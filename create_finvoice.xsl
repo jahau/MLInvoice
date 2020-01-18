@@ -1,21 +1,49 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
+<!--
+ This file is licensed under the MIT license.
+
+ Copyright 2011-2019 Ere Maijala
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-->
+
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
   <xsl:param name="stylesheet"/>
-  <xsl:output method="xml" version="1.0" encoding="iso-8859-15" indent="yes"/>
+  <xsl:output method="xml" version="1.0" encoding="ISO-8859-15" indent="yes"/>
   <xsl:decimal-format name="euro" decimal-separator="," grouping-separator=""/>
   <xsl:template match="/invoicedata">
   <xsl:if test="$stylesheet!=''">
   <xsl:text disable-output-escaping="yes">&lt;?xml-stylesheet type="text/xsl" href="</xsl:text><xsl:value-of select="$stylesheet"/><xsl:text disable-output-escaping="yes">"?&gt;&#10;</xsl:text>
   </xsl:if>
 
-<Finvoice Version="1.3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="Finvoice.xsd">
+<Finvoice Version="2.01" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="Finvoice2.01.xsd">
+  <xsl:if test="$printTransmissionDetails">
+    <MessageTransmissionDetails>
+        <MessageSenderDetails>
+            <FromIdentifier><xsl:value-of select="sender/org_unit_number"/></FromIdentifier>
+            <FromIntermediator><xsl:value-of select="sender/payment_intermediator"/></FromIntermediator>
+        </MessageSenderDetails>
+        <MessageReceiverDetails>
+            <ToIdentifier><xsl:value-of select="recipient/org_unit_number"/></ToIdentifier>
+            <ToIntermediator><xsl:value-of select="recipient/payment_intermediator"/></ToIntermediator>
+        </MessageReceiverDetails>
+        <MessageDetails>
+            <MessageIdentifier><xsl:value-of select="invoice/invoice_no"/></MessageIdentifier>
+            <MessageTimeStamp><xsl:value-of select="settings/current_timestamp_utc"/></MessageTimeStamp>
+        </MessageDetails>
+    </MessageTransmissionDetails>
+  </xsl:if>
     <xsl:apply-templates select="sender"/>
     <xsl:apply-templates select="recipient"/>
     <xsl:apply-templates select="invoice"/>
 </Finvoice>
   </xsl:template>
-  
+
   <xsl:template match="sender">
   <SellerPartyDetails>
     <SellerPartyIdentifier><xsl:value-of select="company_id"/></SellerPartyIdentifier>
@@ -44,6 +72,13 @@
   </SellerCommunicationDetails>
     </xsl:if>
   <SellerInformationDetails>
+      <xsl:if test="street_address!='' and zip_code!='' and city !=''">
+    <SellerOfficialPostalAddressDetails>
+      <SellerOfficialStreetName><xsl:value-of select="street_address"/></SellerOfficialStreetName>
+      <SellerOfficialTownName><xsl:value-of select="city"/></SellerOfficialTownName>
+      <SellerOfficialPostCodeIdentifier><xsl:value-of select="zip_code"/></SellerOfficialPostCodeIdentifier>
+    </SellerOfficialPostalAddressDetails>
+      </xsl:if>
       <xsl:if test="vat_registered!=0">
     <SellerVatRegistrationText>Alv.Rek</SellerVatRegistrationText>
       </xsl:if>
@@ -53,19 +88,19 @@
       <xsl:if test="bank_iban!=''">
     <SellerAccountDetails>
       <SellerAccountID IdentificationSchemeName="IBAN"><xsl:call-template name="string-replace-all"><xsl:with-param name="text" select="bank_iban" /><xsl:with-param name="replace" select="' '" /><xsl:with-param name="by" select="''"/></xsl:call-template></SellerAccountID>
-      <SellerBic IdentificationSchemeName="BIC"><xsl:value-of select="bank_swiftbic"/></SellerBic>  
+      <SellerBic IdentificationSchemeName="BIC"><xsl:value-of select="bank_swiftbic"/></SellerBic>
     </SellerAccountDetails>
       </xsl:if>
       <xsl:if test="bank_iban2!=''">
     <SellerAccountDetails>
       <SellerAccountID IdentificationSchemeName="IBAN"><xsl:call-template name="string-replace-all"><xsl:with-param name="text" select="bank_iban2" /><xsl:with-param name="replace" select="' '" /><xsl:with-param name="by" select="''"/></xsl:call-template></SellerAccountID>
-      <SellerBic IdentificationSchemeName="BIC"><xsl:value-of select="bank_swiftbic2"/></SellerBic>  
+      <SellerBic IdentificationSchemeName="BIC"><xsl:value-of select="bank_swiftbic2"/></SellerBic>
     </SellerAccountDetails>
       </xsl:if>
       <xsl:if test="bank_iban3!=''">
     <SellerAccountDetails>
       <SellerAccountID IdentificationSchemeName="IBAN"><xsl:call-template name="string-replace-all"><xsl:with-param name="text" select="bank_iban3" /><xsl:with-param name="replace" select="' '" /><xsl:with-param name="by" select="''"/></xsl:call-template></SellerAccountID>
-      <SellerBic IdentificationSchemeName="BIC"><xsl:value-of select="bank_swiftbic3"/></SellerBic>  
+      <SellerBic IdentificationSchemeName="BIC"><xsl:value-of select="bank_swiftbic3"/></SellerBic>
     </SellerAccountDetails>
       </xsl:if>
   </SellerInformationDetails>
@@ -74,7 +109,7 @@
   <xsl:template match="recipient">
   <BuyerPartyDetails>
     <BuyerPartyIdentifier><xsl:value-of select="company_id"/></BuyerPartyIdentifier>
-    <BuyerOrganisationName><xsl:value-of select="company_name"/></BuyerOrganisationName>
+    <BuyerOrganisationName><xsl:value-of select="substring(company_name, 1, 70)"/></BuyerOrganisationName>
     <xsl:if test="vat_id!=''">
       <BuyerOrganisationTaxCode><xsl:value-of select="vat_id"/></BuyerOrganisationTaxCode>
     </xsl:if>
@@ -101,7 +136,7 @@
   </BuyerCommunicationDetails>
     </xsl:if>
   </xsl:template>
-  
+
   <xsl:template match="invoice">
   <InvoiceDetails>
     <xsl:choose>
@@ -142,7 +177,15 @@
     </VatSpecificationDetails>
     </xsl:for-each>
     <xsl:if test="info!=''">
-    <InvoiceFreeText><xsl:value-of select="substring(info, 1, 512)"/></InvoiceFreeText>
+      <xsl:call-template name="chunk-field">
+        <xsl:with-param name="tag" select="'InvoiceFreeText'"/>
+        <xsl:with-param name="contents" select="info"/>
+        <!--
+          The real limit is 512, but at least some versions of libxslt have trouble with
+          long elements when outputting ISO-8859-15 with indent="yes". So, leave a bit of room.
+        -->
+        <xsl:with-param name="chunksize" select="448"/>
+      </xsl:call-template>
     </xsl:if>
     <PaymentTermsDetails>
       <PaymentTermsFreeText><xsl:value-of select="../settings/invoice_terms_of_payment"/></PaymentTermsFreeText>
@@ -173,20 +216,16 @@
     <ArticleIdentifier><xsl:value-of select="product_code"/></ArticleIdentifier>
     </xsl:if>
     <xsl:choose>
-      <xsl:when test="product_name!='' and description!=''">
-    <ArticleName><xsl:value-of select="product_name"/> (<xsl:value-of select="description"/>)</ArticleName>
-      </xsl:when>
-      <xsl:when test="product_name!=''">
-    <ArticleName><xsl:value-of select="product_name"/></ArticleName>
-      </xsl:when>
-      <xsl:when test="description!=''">
-    <ArticleName><xsl:value-of select="description"/></ArticleName>
+      <xsl:when test="row_description!=''">
+    <ArticleName><xsl:value-of select="row_description"/></ArticleName>
       </xsl:when>
       <xsl:otherwise>
     <ArticleName>--</ArticleName>
       </xsl:otherwise>
     </xsl:choose>
     <xsl:choose>
+      <xsl:when test="extended_description">
+      </xsl:when>
       <xsl:when test="partial_payment=1">
     <RowAmount AmountCurrencyIdentifier="EUR"><xsl:value-of select="format-number(price, '0,00###', 'euro')"/></RowAmount>
       </xsl:when>
@@ -194,7 +233,20 @@
     <DeliveredQuantity QuantityUnitCode="{@type}"><xsl:value-of select="format-number(pcs, '0,00', 'euro')"/></DeliveredQuantity>
     <UnitPriceAmount AmountCurrencyIdentifier="EUR"><xsl:value-of select="format-number(price, '0,00###', 'euro')"/></UnitPriceAmount>
     <RowDeliveryDate Format="CCYYMMDD"><xsl:value-of select="row_date"/></RowDeliveryDate>
+    <xsl:choose>
+      <xsl:when test="discount_amount=0">
     <RowDiscountPercent><xsl:value-of select="format-number(discount, '0,0#', 'euro')"/></RowDiscountPercent>
+      </xsl:when>
+      <xsl:when test="discount=0 and discount_amount!=0">
+    <RowDiscountAmount AmountCurrencyIdentifier="EUR"><xsl:value-of select="format-number(discount_amount, '0,00###', 'euro')"/></RowDiscountAmount>
+      </xsl:when>
+      <xsl:otherwise>
+    <RowProgressiveDiscountDetails>
+      <RowDiscountPercent><xsl:value-of select="format-number(discount, '0,0#', 'euro')"/></RowDiscountPercent>
+      <RowDiscountAmount AmountCurrencyIdentifier="EUR"><xsl:value-of select="format-number(discount_amount, '0,00###', 'euro')"/></RowDiscountAmount>
+    </RowProgressiveDiscountDetails>
+      </xsl:otherwise>
+    </xsl:choose>
     <RowVatRatePercent><xsl:value-of select="format-number(vat, '0,0#', 'euro')"/></RowVatRatePercent>
     <RowVatAmount AmountCurrencyIdentifier="EUR"><xsl:value-of select="format-number(rowvat, '0,00###', 'euro')"/></RowVatAmount>
     <RowVatExcludedAmount AmountCurrencyIdentifier="EUR"><xsl:value-of select="format-number(rowsum, '0,00###', 'euro')"/></RowVatExcludedAmount>
@@ -206,7 +258,7 @@
   <EpiDetails>
     <EpiIdentificationDetails>
       <EpiDate Format="CCYYMMDD"><xsl:value-of select="invoice_date"/></EpiDate>
-      <EpiReference>1</EpiReference> 
+      <EpiReference>1</EpiReference>
     </EpiIdentificationDetails>
     <EpiPartyDetails>
       <EpiBfiPartyDetails>
@@ -219,22 +271,31 @@
       </EpiBeneficiaryPartyDetails>
     </EpiPartyDetails>
     <EpiPaymentInstructionDetails>
+  <xsl:choose>
+    <xsl:when test="invoicetype/identifier">
+      <EpiPaymentInstructionId><xsl:value-of select="invoicetype/identifier"/></EpiPaymentInstructionId>
+    </xsl:when>
+    <xsl:otherwise>
       <EpiPaymentInstructionId><xsl:value-of select="invoice_no"/></EpiPaymentInstructionId>
+    </xsl:otherwise>
+  </xsl:choose>
   <xsl:choose>
     <xsl:when test="substring(formatted_ref_number, 1, 2) = 'RF'">
       <EpiRemittanceInfoIdentifier IdentificationSchemeName="ISO"><xsl:value-of select="formatted_ref_number"/></EpiRemittanceInfoIdentifier>
     </xsl:when>
+    <xsl:when test="format-number(ref_number, '00000000000000000000') = 'NaN'">
+    </xsl:when>
     <xsl:otherwise>
       <EpiRemittanceInfoIdentifier IdentificationSchemeName="SPY"><xsl:value-of select="format-number(ref_number, '00000000000000000000')"/></EpiRemittanceInfoIdentifier>
     </xsl:otherwise>
-  </xsl:choose>    
+  </xsl:choose>
       <EpiInstructedAmount AmountCurrencyIdentifier="EUR"><xsl:value-of select="format-number(totalsumvat - paidsum, '0,00', 'euro')"/></EpiInstructedAmount>
       <EpiCharge ChargeOption="SHA">SHA</EpiCharge>
       <EpiDateOptionDate Format="CCYYMMDD"><xsl:value-of select="due_date"/></EpiDateOptionDate>
     </EpiPaymentInstructionDetails>
   </EpiDetails>
   </xsl:template>
-  
+
   <xsl:template name="string-replace-all">
     <xsl:param name="text" />
     <xsl:param name="replace" />
@@ -255,5 +316,21 @@
       </xsl:otherwise>
     </xsl:choose>
   </xsl:template>
-  
+
+  <xsl:template name="chunk-field">
+    <xsl:param name="tag" />
+    <xsl:param name="contents" />
+    <xsl:param name="chunksize" />
+
+    <xsl:element name="{$tag}">
+      <xsl:value-of select="substring($contents, 1, $chunksize)"/>
+    </xsl:element>
+    <xsl:if test="string-length($contents) > $chunksize">
+      <xsl:call-template name="chunk-field">
+        <xsl:with-param name="tag" select="$tag"/>
+        <xsl:with-param name="contents" select="substring($contents, $chunksize + 1)"/>
+        <xsl:with-param name="chunksize" select="$chunksize"/>
+      </xsl:call-template>
+    </xsl:if>
+  </xsl:template>
 </xsl:stylesheet>

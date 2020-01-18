@@ -12,8 +12,15 @@ Thumbs.db
 .buildpath
 .ExternalToolBuilders
 
+# VSCode
+.vscode
+
 # Local files
 config.php
 tcpdf/cache/*
 !tcpdf/cache/empty
-
+vendor
+.php_cs.cache
+db_data/*
+node_modules
+css/custom.css

@@ -1,28 +1,79 @@
 <?php
-/*******************************************************************************
- MLInvoice: web-based invoicing application.
- Copyright (C) 2010-2015 Ere Maijala
-
- This program is free software. See attached LICENSE.
-
- *******************************************************************************/
-
-/*******************************************************************************
- MLInvoice: web-pohjainen laskutusohjelma.
- Copyright (C) 2010-2015 Ere Maijala
-
- Tämä ohjelma on vapaa. Lue oheinen LICENSE.
-
- *******************************************************************************/
+/**
+ * XSLT invoice
+ *
+ * PHP version 5
+ *
+ * Copyright (C) 2010-2018 Ere Maijala
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2,
+ * as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * @category MLInvoice
+ * @package  MLInvoice\Base
+ * @author   Ere Maijala <ere@labs.fi>
+ * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
+ * @link     http://labs.fi/mlinvoice.eng.php
+ */
 require_once 'invoice_printer_base.php';
 require_once 'htmlfuncs.php';
 require_once 'miscfuncs.php';
+require_once 'pdf.php';
+require_once 'markdown.php';
 
+/**
+ * XSLT invoice
+ *
+ * @category MLInvoice
+ * @package  MLInvoice\Base
+ * @author   Ere Maijala <ere@labs.fi>
+ * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
+ * @link     http://labs.fi/mlinvoice.eng.php
+ */
 class InvoicePrinterXslt extends InvoicePrinterBase
 {
+    /**
+     * XSLT parameters
+     *
+     * @var array
+     */
+    protected $xsltParams = [];
 
+    /**
+     * Transform the invoice to XML
+     *
+     * @param string $xslt XSLT file name
+     * @param string $xsd  Optional XSD name used to check the results
+     *
+     * @return void
+     */
     protected function transform($xslt, $xsd = '')
     {
+        if (!class_exists('XSLTProcessor')) {
+            die(
+                <<<EOT
+<p>This printout requires the PHP XSL extension, more specifically the XSLTProcessor
+class, which seems to be missing. Please install the XSL extension or request
+your server administrator to do it.</p>
+<p>Many Linux distributions offer the XSL extension in a separate package that can be
+installed with a package manager. E.g. in Ubuntu the package might be php5-xsl,
+php7.0-xsl or php7.1-xsl depending on the PHP version.</p>
+<p>More information about the XSL extension is available in the
+<a href="http://php.net/manual/en/book.xsl.php" target="_blank">PHP Manual</a>.
+EOT
+            );
+        }
+
         $xml = new SimpleXMLElement('<?xml version="1.0"?><invoicedata/>');
         $sender = $xml->addChild('sender');
         $this->arrayToXML($this->senderData, $sender);
@@ -39,38 +90,82 @@ class InvoicePrinterXslt extends InvoicePrinterBase
         $invoiceData['barcode'] = $this->barcode;
         $invoiceData['groupedvats'] = $this->groupedVATs;
         $this->arrayToXML($invoiceData, $invoice);
+        $rows = $invoice->addChild('rows');
+        $this->arrayToXML($this->getInvoiceRowData(), $rows, 'row');
+        $type = $invoice->addChild('invoicetype');
+        $this->arrayToXML($this->invoiceTypeData, $type, 'invoicetype');
 
-        foreach ($this->invoiceRowData as  &$data) {
-            if (isset($GLOBALS["locPDF{$data['type']}"])) {
-                $data['type'] = $GLOBALS["locPDF{$data['type']}"];
+        if ($this->attachments) {
+            $attachments = $invoice->addChild('attachments');
+            foreach ($this->attachments as $attachment) {
+                $attachment = getInvoiceAttachment($attachment['id']);
+
+                $xmlAttachment = $attachments->addChild('attachment');
+                $xmlAttachment->addChild(
+                    'name',
+                    $attachment['name'] ? $attachment['name'] : $attachment['filename']
+                );
+                $xmlAttachment->addChild('mimetype', $attachment['mimetype']);
+                $xmlAttachment->addChild('filesize', $attachment['filesize']);
+                $xmlAttachment->addChild('filename', $attachment['filename']);
+
+                if ('application/pdf' !== $attachment['mimetype']) {
+                    // Image to PDF
+                    $pdf = new PDF('P', 'mm', 'A4', _CHARSET_ == 'UTF-8', _CHARSET_, false);
+                    $pdf->AddPage();
+                    $pdf->Image(
+                        '@' . $attachment['filedata'],
+                        $this->left,
+                        $this->autoPageBreakMargin,
+                        $this->width,
+                        0,
+                        '',
+                        '',
+                        'B',
+                        false,
+                        300,
+                        'C'
+                    );
+                    $pdf->SetXY($this->left, $pdf->GetY() + 5);
+                    $pdf->SetFont('Helvetica', '', 10);
+                    $pdf->multiCellMD(
+                        $this->width,
+                        5,
+                        $attachment['name'] ? $attachment['name']
+                            : $attachment['filename'],
+                        'L'
+                    );
+                    $xmlAttachment->addChild('filedata', base64_encode($pdf->Output('', 'S')));
+                } else {
+                    $xmlAttachment->addChild('filedata', base64_encode($attachment['filedata']));
+                }
             }
         }
 
-        $rows = $invoice->addChild('rows');
-        $this->arrayToXML($this->invoiceRowData, $rows, 'row');
-
-        require 'settings_def.php';
+        include 'settings_def.php';
         $settingsData = [];
         foreach ($arrSettings as $key => $value) {
             if (substr($key, 0, 8) == 'invoice_' && $value['type'] != 'LABEL') {
                 switch ($key) {
                 case 'invoice_terms_of_payment' :
-                    $settingsData[$key] = sprintf(
-                        getTermsOfPayment($invoiceData['company_id']),
-                        getPaymentDays($invoiceData['company_id']));
+                    $settingsData[$key] = $this->getTermsOfPayment(
+                        getPaymentDays($invoiceData['company_id'])
+                    );
                     break;
                 case 'invoice_pdf_filename' :
                     $settingsData[$key] = $this->getPrintOutFileName(
-                        getSetting('invoice_pdf_filename'));
+                        getSetting('invoice_pdf_filename')
+                    );
                     break;
                 default :
                     $settingsData[$key] = getSetting($key);
                 }
             }
         }
-        $settingsData['invoice_penalty_interest_desc'] = $GLOBALS['locPDFPenaltyInterestDesc'] .
-             ': ' . miscRound2OptDecim(getSetting('invoice_penalty_interest'), 1) .
-             ' %';
+        $settingsData['invoice_penalty_interest_desc']
+            = $this->translate('PenaltyInterestDesc')
+            . ': ' . miscRound2OptDecim(getSetting('invoice_penalty_interest'), 1)
+            . ' %';
         $settingsData['current_time_year'] = date('Y');
         $settingsData['current_time_mon'] = date('m');
         $settingsData['current_time_day'] = date('d');
@@ -87,6 +182,10 @@ class InvoicePrinterXslt extends InvoicePrinterBase
         $xsl->load($xslt);
         $xsltproc->importStylesheet($xsl);
         $xsltproc->setParameter('', 'stylesheet', $this->printStyle);
+        foreach ($this->xsltParams as $param => $value) {
+            $xsltproc->setParameter('', $param, $value);
+        }
+
         $domDoc = dom_import_simplexml($xml)->ownerDocument;
         $this->xml = $xsltproc->transformToXML($domDoc);
 
@@ -122,15 +221,25 @@ class InvoicePrinterXslt extends InvoicePrinterBase
         }
     }
 
+    /**
+     * Convert an array to XML
+     *
+     * @param array            $array       Array
+     * @param SimpleXMLElement $xml         XML
+     * @param string           $subnodename Sub node
+     *
+     * @return void
+     */
     protected function arrayToXML($array, &$xml, $subnodename = '')
     {
         foreach ($array as $key => $value) {
             if (is_array($value)) {
+                $node = $xml->addChild(
+                    '' !== $subnodename ? $subnodename : $key
+                );
                 if (!is_numeric($key)) {
-                    $node = $xml->addChild($key);
                     $this->arrayToXML($value, $node);
                 } else {
-                    $node = $xml->addChild($subnodename);
                     $this->arrayToXML($value, $node);
                 }
             } else {
@@ -141,5 +250,50 @@ class InvoicePrinterXslt extends InvoicePrinterBase
                 }
             }
         }
+    }
+
+    /**
+     * Preprocess and return invoice rows
+     *
+     * @return array
+     */
+    protected function getInvoiceRowData()
+    {
+        // Preprocess invoice rows
+        if (getSetting('printout_markdown')) {
+            $markdown = new MLMarkdown();
+        } else {
+            $markdown = null;
+        }
+        $rows = [];
+        foreach ($this->invoiceRowData as $data) {
+            $data['type'] = $this->translate($data['type']);
+            if ($markdown) {
+                foreach (['product_name', 'product_code', 'description'] as $key) {
+                    if (!empty($data[$key])) {
+                        $markdownData = $markdown->transform($data[$key]);
+                        $data[$key] = trim(
+                            strip_tags(
+                                html_entity_decode(
+                                    $markdownData,
+                                    ENT_COMPAT | ENT_HTML401,
+                                    'UTF-8'
+                                )
+                            )
+                        );
+                    }
+                }
+            }
+            $rowDesc = '';
+            if (!empty($data['product_name']) && !empty($data['description'])) {
+                $rowDesc = $data['product_name'] . ' (' . $data['description'] . ')';
+            } else {
+                $rowDesc = (null !== $data['product_name'] ? $data['product_name'] : '')
+                    . $data['description'];
+            }
+            $data['row_description'] = $rowDesc;
+            $rows[] = $data;
+        }
+        return $rows;
     }
 }

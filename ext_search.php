@@ -1,66 +1,72 @@
 <?php
-/*******************************************************************************
- MLInvoice: web-based invoicing application.
- Copyright (C) 2010-2015 Ere Maijala
- 
- Portions based on:
- PkLasku : web-based invoicing software.
- Copyright (C) 2004-2008 Samu Reinikainen
- 
- This program is free software. See attached LICENSE.
- 
- *******************************************************************************/
-
-/*******************************************************************************
- MLInvoice: web-pohjainen laskutusohjelma.
- Copyright (C) 2010-2015 Ere Maijala
- 
- Perustuu osittain sovellukseen:
- PkLasku : web-pohjainen laskutusohjelmisto.
- Copyright (C) 2004-2008 Samu Reinikainen
- 
- Tämä ohjelma on vapaa. Lue oheinen LICENSE.
- 
- *******************************************************************************/
+/**
+ * Extended search
+ *
+ * PHP version 5
+ *
+ * Copyright (C) 2004-2008 Samu Reinikainen
+ * Copyright (C) 2010-2018 Ere Maijala
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2,
+ * as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * @category MLInvoice
+ * @package  MLInvoice\Base
+ * @author   Ere Maijala <ere@labs.fi>
+ * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
+ * @link     http://labs.fi/mlinvoice.eng.php
+ */
 require_once 'htmlfuncs.php';
 require_once 'sqlfuncs.php';
 require_once 'sessionfuncs.php';
 require_once 'miscfuncs.php';
 require_once 'datefuncs.php';
+require_once 'form_config.php';
 
 sesVerifySession();
 
-require_once 'localize.php';
+require_once 'translator.php';
 
-$strFunc = getRequest('func', '');
-$strForm = getRequest('form', '');
-if ($strFunc == 'open_invoices')
+$strFunc = getPostOrQuery('func', '');
+$strForm = getPostOrQuery('form', '');
+if ($strFunc == 'open_invoices') {
     $strFunc = 'invoices';
-$strList = $strFunc;
+}
+$strList = getListFromFunc($strFunc);
 
-$blnSearch = getPost('search_x', FALSE) ? TRUE : FALSE;
-$blnSave = getPost('save_x', FALSE) ? TRUE : FALSE;
-$strFields = getPost('fields', FALSE);
-$strSearchField = getPost('searchfield', FALSE);
+$blnSearch = getPost('search_x', false) ? true : false;
+$blnSave = getPost('save_x', false) ? true : false;
+$strFields = getPost('fields', false);
+$strSearchField = getPost('searchfield', false);
 $strSearchName = getPost('searchname', '');
-if ($strSearchField !== FALSE) {
-    if ($strFields === FALSE) {
+if ($strSearchField !== false) {
+    if ($strFields === false) {
         $strFields = $strSearchField;
     } else {
         $strFields .= ",$strSearchField";
     }
 }
 
-if ($strFields !== FALSE) {
+if ($strFields !== false) {
     $astrSelectedFields = explode(',', $strFields);
 } else {
     $astrSelectedFields = [];
 }
 
-require 'form_switch.php';
+$formConfig = getFormConfig($strForm, 'ext_search');
 
 for ($j = 0; $j < count($astrSelectedFields); $j ++) {
-    $tmpDelete = getPost('delete_' . $astrSelectedFields[$j] . '_x', FALSE);
+    $tmpDelete = getPost('delete_' . $astrSelectedFields[$j] . '_x', false);
     if ($tmpDelete) {
         $astrSelectedFields[$j] = '';
     }
@@ -68,28 +74,31 @@ for ($j = 0; $j < count($astrSelectedFields); $j ++) {
 
 $strFields = implode(',', $astrSelectedFields);
 
-for ($j = 0; $j < count($astrFormElements); $j ++) {
-    if ($astrFormElements[$j]['type'] == 'RESULT' &&
-         $astrFormElements[$j]['name'] != '') {
-        $astrFormElements[$j]['type'] = 'TEXT';
+foreach ($formConfig['fields'] as &$field) {
+    if ($field['type'] == 'RESULT' && $field['name'] != '') {
+        $field['type'] = 'TEXT';
     }
 }
 
 $listValues = [];
-for ($j = 0; $j < count($astrFormElements); $j ++) {
-    if ($astrFormElements[$j]['type'] != '' &&
-         $astrFormElements[$j]['type'] != 'LABEL' &&
-         $astrFormElements[$j]['type'] != 'HIDINT' &&
-         $astrFormElements[$j]['type'] != 'IFORM' &&
-         $astrFormElements[$j]['type'] != 'BUTTON' &&
-         $astrFormElements[$j]['type'] != 'JSBUTTON' &&
-         !in_array($astrFormElements[$j]['name'], $astrSelectedFields, true)) {
-        $listValues[$astrFormElements[$j]['name']] = str_replace('<br>', ' ', 
-            $astrFormElements[$j]['label']);
+foreach ($formConfig['fields'] as $field) {
+    if ($field['type'] != ''
+        && $field['type'] != 'LABEL'
+        && $field['type'] != 'HID_INT'
+        && $field['type'] != 'IFORM'
+        && $field['type'] != 'BUTTON'
+        && $field['type'] != 'JSBUTTON'
+        && $field['type'] != 'DROPDOWNMENU'
+        && !in_array($field['name'], $astrSelectedFields, true)
+    ) {
+        $listValues[$field['name']] = str_replace(
+            '<br>', ' ',
+            Translator::translate($field['label'])
+        );
     }
-    $strControlType = $astrFormElements[$j]['type'];
-    $strControlName = $astrFormElements[$j]['name'];
-    
+    $strControlType = $field['type'];
+    $strControlName = $field['name'];
+
     if ($strControlType == 'IFORM' || $strControlType == 'BUTTON') {
         $astrValues[$strControlName] = '';
     } elseif ($strControlType != 'LABEL') {
@@ -103,211 +112,228 @@ for ($j = 0; $j < count($astrFormElements); $j ++) {
 $strListBox = htmlListBox('searchfield', $listValues, false, '', true);
 
 $comparisonValues = [
-    '=' => $GLOBALS['locSearchEqual'], 
-    '!=' => $GLOBALS['locSearchNotEqual'], 
-    '<' => $GLOBALS['locSearchLessThan'], 
-    '>' => $GLOBALS['locSearchGreaterThan']
+    '=' => Translator::translate('SearchEqual'),
+    '!=' => Translator::translate('SearchNotEqual'),
+    '<' => Translator::translate('SearchLessThan'),
+    '>' => Translator::translate('SearchGreaterThan')
 ];
 
 $strOnLoad = '';
 if ($blnSearch || $blnSave) {
     $strWhereClause = '';
-    for ($j = 0; $j < count($astrFormElements); $j ++) {
-        $elem = $astrFormElements[$j];
-        $name = $elem['name'];
+    foreach ($formConfig['fields'] as $field) {
+        $name = $field['name'];
         if (in_array($name, $astrSelectedFields, true)) {
             $strSearchOperator = getPost("operator_$name", '');
-            if ($strSearchOperator)
+            if ($strSearchOperator) {
                 $strSearchOperator = " $strSearchOperator ";
+            }
             $strSearchMatch = getPost("searchmatch_$name", '=');
-            
+
             // do LIKE || NOT LIKE search to elements with text or varchar datatype
-            if ($elem['type'] == 'TEXT' || $elem['type'] == 'AREA') {
+            if ($field['type'] == 'TEXT' || $field['type'] == 'AREA') {
                 if ($strSearchMatch == '=') {
                     $strSearchMatch = 'LIKE';
                 } else {
                     $strSearchMatch = 'NOT LIKE';
                 }
                 $strSearchValue = "'%" . addcslashes($astrValues[$name], "'\\") . "%'";
-            } elseif ($astrFormElements[$j]['type'] == 'INT' ||
-                 $astrFormElements[$j]['type'] == 'LIST' ||
-                 $astrFormElements[$j]['type'] == 'SELECT' ||
-                 $astrFormElements[$j]['type'] == 'SEARCHLIST') {
+            } elseif ($field['type'] == 'INT'
+                || $field['type'] == 'LIST'
+                || $field['type'] == 'SELECT'
+                || $field['type'] == 'SEARCHLIST'
+                || $field['type'] == 'TAGS'
+            ) {
                 $strSearchValue = $astrValues[$name];
-            } elseif ($astrFormElements[$j]['type'] == 'CHECK') {
+            } elseif ($field['type'] == 'CHECK') {
                 $strSearchValue = $astrValues[$name] ? 1 : 0;
-            } elseif ($astrFormElements[$j]['type'] == 'INTDATE') {
+            } elseif ($field['type'] == 'INTDATE') {
                 $strSearchValue = dateConvDate2DBDate($astrValues[$name]);
             }
-            if ($strSearchValue)
-                $strWhereClause .= "$strSearchOperator$strListTableAlias$name $strSearchMatch $strSearchValue";
+            if ($strSearchValue) {
+                $tableAlias = $formConfig['tableAlias'];
+                $strWhereClause .= "$strSearchOperator$tableAlias$name $strSearchMatch $strSearchValue";
+            }
         }
     }
-    
+
     $strWhereClause = urlencode($strWhereClause);
     if ($blnSearch) {
         $strLink = "index.php?func=$strFunc&where=$strWhereClause";
         $strOnLoad = "opener.location.href='$strLink'";
     }
-    
+
     if ($blnSave && $strSearchName) {
         $strQuery = 'INSERT INTO {prefix}quicksearch(user_id, name, func, whereclause) ' .
              'VALUES (?, ?, ?, ?)';
-        $intRes = mysqli_param_query($strQuery, 
+        dbParamQuery(
+            $strQuery,
             [
-                $_SESSION['sesUSERID'], 
-                $strSearchName, 
-                $strFunc, 
+                $_SESSION['sesUSERID'],
+                $strSearchName,
+                $strFunc,
                 $strWhereClause
-            ]);
+            ]
+        );
     } elseif ($blnSave && !$strSearchName) {
-        $strOnLoad = "alert('" . $GLOBALS['locErrorNoSearchName'] . "')";
+        $strOnLoad = "alert('" . Translator::translate('ErrorNoSearchName') . "')";
     }
 }
 
-echo htmlPageStart(_PAGE_TITLE_);
+echo htmlPageStart();
 ?>
 <body onload="<?php echo $strOnLoad?>">
-	<script type="text/javascript">
+    <script>
 <!--
 $(function() {
   $('input[class~="hasCalendar"]').datepicker();
 });
 -->
 </script>
-	<div class="form_container ui-widget-content">
-		<div class="form ui-widget">
-			<form method="post"
-				action="ext_search.php?func=<?php echo $strFunc?>&amp;form=<?php echo $strForm?>"
-				target="_self" name="search_form">
-				<input type="hidden" name="fields" value="<?php echo $strFields?>">
-				<table>
-					<thead>
-						<tr>
-							<th class="sublabel">
-    <?php echo $GLOBALS['locSearchField']?>
-
-
-							
-							
-							
-							
-							</td>
-							<th class="sublabel">&nbsp;
-							
-							</td>
-							<th class="sublabel">
-    <?php echo $GLOBALS['locSearchTerm']?>
-
-
-							
-							
-							
-							
-							</td>
-							<td></td>
-						</tr>
-					</thead>
-					<tbody>
+  <div class="form_container ui-widget-content">
+    <div class="form ui-widget">
+      <form method="post"
+        action="ext_search.php?func=<?php echo $strFunc?>&amp;form=<?php echo $strForm?>"
+        target="_self" name="search_form">
+        <input type="hidden" name="fields" value="<?php echo $strFields?>">
+        <table>
+          <thead>
+            <tr>
+              <th class="sublabel">
+                <?php echo Translator::translate('SearchField')?>
+              </th>
+              <th class="sublabel">&nbsp;</th>
+              <th class="sublabel">
+                <?php echo Translator::translate('SearchTerm')?>
+              </th>
+              <th></th>
+            </tr>
+          </thead>
+        <tbody>
 <?php
 
 $fieldCount = 0;
-for ($j = 0; $j < count($astrFormElements); $j ++) {
-    if (in_array($astrFormElements[$j]['name'], $astrSelectedFields, true)) {
-        $strSearchMatch = getPost('searchmatch_' . $astrFormElements[$j]['name'], 
-            '=');
-        if ($astrFormElements[$j]['style'] == 'xxlong') {
-            $astrFormElements[$j]['style'] = 'long';
+foreach ($formConfig['fields'] as $field) {
+    if (in_array($field['name'], $astrSelectedFields, true)) {
+        $strSearchMatch = getPost(
+            'searchmatch_' . $field['name'],
+            '='
+        );
+        if ($field['style'] == 'xxlong') {
+            $field['style'] = 'long';
         }
-        
+
         if (++$fieldCount > 1) {
             $strSelectedOperator = getPost(
-                'operator_' . $astrFormElements[$j]['name'], 'AND');
-            $strOperator = htmlListBox('operator_' . $astrFormElements[$j]['name'], 
+                'operator_' . $field['name'], 'AND'
+            );
+            $strOperator = htmlListBox(
+                'operator_' . $field['name'],
                 [
-                    'AND' => $GLOBALS['locSearchAND'], 
-                    'OR' => $GLOBALS['locSearchOR']
-                ], $strSelectedOperator);
+                    'AND' => Translator::translate('SearchAND'),
+                    'OR' => Translator::translate('SearchOR')
+                ], $strSelectedOperator
+            );
             ?>
-<tr>
-							<td colspan="4">
-    <?php echo $strOperator?>
-  </td>
-						</tr>
-<?php
+            <tr>
+              <td colspan="4">
+                <?php echo $strOperator?>
+              </td>
+            </tr>
+            <?php
         }
         ?>
-<tr class="search_row">
-							<td class="label">
-    <?php echo $astrFormElements[$j]['label']?>
-  </td>
-							<td class="field">
-    <?php echo htmlListBox('searchmatch_' . $astrFormElements[$j]['name'], $comparisonValues, $strSearchMatch, '', 0)?>
-  </td>
-							<td class="field">
-    <?php echo htmlFormElement($astrFormElements[$j]['name'], $astrFormElements[$j]['type'], $astrValues[$astrFormElements[$j]['name']], $astrFormElements[$j]['style'], $astrFormElements[$j]['listquery'], 'MODIFY', $astrFormElements[$j]['parent_key'], '', [], '', isset($astrFormElements[$j]['options']) ? $astrFormElements[$j]['options'] : NULL)?>
-  </td>
-							<td><input type="hidden"
-								name="delete_<?php echo $astrFormElements[$j]['name']?>_x"
-								value="0"> <a class="tinyactionlink" href="#"
-								title="<?php echo $GLOBALS['locDelRow']?>"
-								onclick="self.document.forms[0].delete_<?php echo $astrFormElements[$j]['name']?>_x.value=1; self.document.forms[0].submit(); return false;">
-									X </a></td>
-						</tr>
-<?php
+            <tr class="search_row">
+              <td class="label">
+                <?php echo Translator::translate($field['label'])?>
+              </td>
+              <td class="field">
+                <?php echo htmlListBox('searchmatch_' . $field['name'], $comparisonValues, $strSearchMatch, '', 0)?>
+              </td>
+              <td class="field">
+                <?php
+                echo htmlFormElement(
+                    $field['name'], $field['type'],
+                    $astrValues[$field['name']],
+                    $field['style'], $field['listquery'],
+                    'MODIFY', $field['parent_key'], '', [], '',
+                    isset($field['options']) ? $field['options'] : null
+                );
+                ?>
+              </td>
+              <td>
+                <?php
+                    $inputName = 'delete_'
+                    . $field['name'] . '_x';
+                ?>
+                <input type="hidden" name="<?php echo $inputName?>"value="0">
+                <a class="tinyactionlink ui-button ui-corner-all ui-widget form-submit" href="#" title="<?php echo Translator::translate('DelRow')?>"
+                  data-set-field="<?php echo $inputName?>">X
+                </a>
+              </td>
+            </tr>
+        <?php
     }
 }
 
 ?>
-<tr>
-							<td class="label">
-  <?php echo $GLOBALS['locSelectSearchField']?>
-  </td>
-							<td class="field" colspan="3">
-  <?php echo $strListBox?>
-  </td>
-						</tr>
-						<tr>
-							<td colspan="4"
-								style="text-align: center; padding-top: 8px; padding-bottom: 8px">
-								<input type="hidden" name="search_x" value="0"> <a
-								class="actionlink" href="#"
-								onclick="self.document.forms[0].search_x.value=1; self.document.forms[0].submit(); return false;"><?php echo $GLOBALS['locSearch']?></a>
-								<a class="actionlink" href="#"
-								onclick="self.close(); return false;"><?php echo $GLOBALS['locClose']?></a>
-							</td>
-						</tr>
-						<tr>
-							<td class="sublabel" colspan="4">
-  <?php echo $GLOBALS['locSearchSave']?>
-  </td>
-						</tr>
+            <tr>
+              <td class="label">
+                <?php echo Translator::translate('SelectSearchField')?>
+              </td>
+              <td class="field" colspan="3">
+                <?php echo $strListBox?>
+              </td>
+            </tr>
+            <tr>
+              <td colspan="4" class="ext-search-buttons">
+                <input type="hidden" name="search_x" value="0">
+                <a class="actionlink ui-button ui-corner-all ui-widget form-submit" href="#"
+                    data-set-field="search_x">
+                    <?php echo Translator::translate('Search')?>
+                </a>
+                <a class="actionlink ui-button ui-corner-all ui-widget popup-close" href="#">
+                    <?php echo Translator::translate('Close')?>
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td class="sublabel" colspan="4">
+                <?php echo Translator::translate('SearchSave')?>
+              </td>
+            </tr>
 <?php
 if ($blnSave && $strSearchName) {
     ?>
-<tr>
-							<td colspan="4">
-    <?php echo $GLOBALS['locSearchSaved']?>
-  </td>
-						</tr>
-<?php
+            <tr>
+              <td colspan="4">
+                <?php echo Translator::translate('SearchSaved')?>
+              </td>
+            </tr>
+    <?php
 }
 ?>
-<tr>
-							<td class="label">
-  <?php echo $GLOBALS['locSearchName']?>
-  </td>
-							<td class="field"><input class="medium" type="text"
-								name="searchname" value="<?php echo $strSearchName?>"></td>
-							<td><input type="hidden" name="save_x" value="0"> <a
-								class="actionlink" href="#"
-								onclick="self.document.forms[0].save_x.value=1; self.document.forms[0].submit(); return false;"><?php echo $GLOBALS['locSaveSearch']?></a>
-							</td>
-						</tr>
-					</tbody>
-				</table>
-			</form>
-		</div>
-	</div>
+            <tr>
+              <td class="label">
+                <?php echo Translator::translate('SearchName')?>
+              </td>
+              <td class="field"><input class="medium" type="text"
+                name="searchname" value="<?php echo $strSearchName?>">
+              </td>
+              <td colspan="2">
+                <input type="hidden" name="save_x" value="0">
+                <a class="actionlink ui-button ui-corner-all ui-widget form-submit" href="#" data-set-field="save_x">
+                <?php echo Translator::translate('SaveSearch')?>
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </form>
+    </div>
+  </div>
+  <script>
+    MLInvoice.Form.setupSelect2();
+  </script>
 </body>
 </html>

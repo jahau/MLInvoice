@@ -1,36 +1,58 @@
 <?php
-/*******************************************************************************
- MLInvoice: web-based invoicing application.
- Copyright (C) 2010-2015 Ere Maijala
- 
- This program is free software. See attached LICENSE.
- 
- *******************************************************************************/
-
-/*******************************************************************************
- MLInvoice: web-pohjainen laskutusohjelma.
- Copyright (C) 2010-2015 Ere Maijala
- 
- Tämä ohjelma on vapaa. Lue oheinen LICENSE.
- 
- *******************************************************************************/
+/**
+ * Login page
+ *
+ * PHP version 5
+ *
+ * Copyright (C) 2010-2018 Ere Maijala
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2,
+ * as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * @category MLInvoice
+ * @package  MLInvoice\Base
+ * @author   Ere Maijala <ere@labs.fi>
+ * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
+ * @link     http://labs.fi/mlinvoice.eng.php
+ */
+require_once 'vendor/autoload.php';
 
 // buffered, so we can redirect later if necessary
 ini_set('implicit_flush', 'Off');
 ob_start();
 
+if (!file_exists(__DIR__ . DIRECTORY_SEPARATOR . 'config.php')) {
+    include_once 'setup.php';
+    $setup = new Setup();
+    $setup->initialSetup();
+    exit();
+}
+
+require_once 'sessionfuncs.php';
 require_once 'sqlfuncs.php';
 require_once 'miscfuncs.php';
 require_once 'config.php';
 require_once 'htmlfuncs.php';
-require_once 'sessionfuncs.php';
 
-session_start();
+if (!session_id()) {
+    session_start();
+}
 
-$strLogin = getPost('flogin', FALSE);
-$strPasswd = getPost('fpasswd', FALSE);
+$strLogin = getPost('login', false);
+$strPasswd = getPost('passwd', false);
+$strCsrf = getPost('csrf', false);
 $strLogon = getPost('logon', '');
-$backlink = getRequest('backlink', '0');
+$backlink = getPostOrQuery('backlink', '0');
 
 if (defined('_UI_LANGUAGE_SELECTION_')) {
     $languages = [];
@@ -38,7 +60,7 @@ if (defined('_UI_LANGUAGE_SELECTION_')) {
         $lang = explode('=', $lang, 2);
         $languages[$lang[0]] = $lang[1];
     }
-    $language = getRequest('lang', '');
+    $language = getPostOrQuery('lang', '');
     if ($language && isset($languages[$language])) {
         $_SESSION['sesLANG'] = $language;
     }
@@ -47,66 +69,71 @@ if (!isset($_SESSION['sesLANG'])) {
     $_SESSION['sesLANG'] = defined('_UI_LANGUAGE_') ? _UI_LANGUAGE_ : 'fi-FI';
 }
 
-require_once 'localize.php';
+require_once 'translator.php';
 
 switch (verifyDatabase()) {
 case 'OK' :
     break;
 case 'UPGRADED' :
-    $upgradeMessage = $GLOBALS['locDatabaseUpgraded'];
+    $upgradeMessage = Translator::translate('DatabaseUpgraded');
     break;
 case 'FAILED' :
     $upgradeFailed = true;
-    $upgradeMessage = $GLOBALS['locDatabaseUpgradeFailed'];
+    $upgradeMessage = Translator::translate('DatabaseUpgradeFailed');
     break;
 }
 
-$strMessage = $GLOBALS['locWelcomeMessage'];
+$strMessage = Translator::translate('WelcomeMessage');
 
 if ($strLogon) {
     if ($strLogin && $strPasswd) {
-        switch (sesCreateSession($strLogin, $strPasswd)) {
+        switch (sesCreateSession($strLogin, $strPasswd, $strCsrf)) {
         case 'OK' :
             if ($backlink == '1' && isset($_SESSION['BACKLINK'])) {
                 header('Location: ' . $_SESSION['BACKLINK']);
             } else {
-                header('Location: ' . getSelfPath() . '/index.php');
+                header('Location: index.php');
             }
             exit();
         case 'FAIL' :
-            $strMessage = $GLOBALS['locInvalidCredentials'];
+            $strMessage = Translator::translate('InvalidCredentials');
             break;
         case 'TIMEOUT' :
-            $strMessage = $GLOBALS['locLoginTimeout'];
+            $strMessage = Translator::translate('LoginTimeout');
             break;
         }
     } else {
-        $strMessage = $GLOBALS['locMissingFields'];
+        $strMessage = Translator::translate('MissingFields');
     }
 }
 
-$key = sesCreateKey();
+sleep(2);
+$csrf = sesCreateCsrf();
 
-echo htmlPageStart(_PAGE_TITLE_, [
-    'jquery/js/jquery.md5.js'
-]);
+echo htmlPageStart('', [], false);
 ?>
 
-<body onload="document.getElementById('flogin').focus();">
-	<div class="pagewrapper ui-widget ui-widget-content">
-		<div class="form" style="padding: 30px;">
+<body onload="document.getElementById('login').focus();">
+    <div class="pagewrapper ui-widget ui-widget-content login">
+        <div id="maintabs" class="navi ui-widget-header ui-tabs">
+            <ul class="ui-tabs-nav ui-helper-clearfix ui-corner-all">
+                <li class="functionlink ui-state-default ui-corner-top ui-tabs-selected ui-state-active">
+                    <a class="ui-tabs-anchor functionlink"><?php echo Translator::translate('Login')?></a>
+                </li>
+            </ul>
+        </div>
 
 <?php
 if (isset($upgradeMessage)) {
     ?>
-<div
-				class="message ui-widget <?php echo isset($upgradeFailed) ? 'ui-state-error' : 'ui-state-highlight'?>">
-  <?php echo $upgradeMessage?>
-</div>
-			<br />
-<?php
+        <div class="message ui-widget <?php echo isset($upgradeFailed) ? 'ui-state-error' : 'ui-state-highlight'?>">
+            <?php echo $upgradeMessage?>
+        </div>
+        <br />
+    <?php
 }
 ?>
+        <div class="ui-widget form login-form">
 
 <?php
 if (isset($languages)) {
@@ -116,49 +143,47 @@ if (isset($languages)) {
         }
         ?>
 <a href="login.php?lang=<?php echo $code?>"><?php echo htmlspecialchars($name)?></a><br />
-<?php
+        <?php
     }
     echo '<br/>';
 }
 ?>
-<h1><?php echo $GLOBALS['locWelcome']?></h1>
-			<p>
-				<span id="loginmsg"><?php echo $strMessage?></span>
-			</p>
-
-			<script type="text/javascript">
-function createHash()
-{
-  var pass_md5 = $.md5(document.getElementById('passwd').value);
-  var key = document.getElementById('key').value;
-  document.getElementById('fpasswd').value = $.md5(key + pass_md5);
-  document.getElementById('passwd').value = '';
-  document.getElementById('key').value = '';
-  var loginmsg = document.getElementById('loginmsg');
-  loginmsg.childNodes.item(0).nodeValue = '<?php echo $GLOBALS['locLoggingIn']?>';
+            <h1><?php echo Translator::translate('Welcome')?></h1>
+            <p>
+                <span id="loginmsg"><?php echo $strMessage?></span>
+            </p>
+            <form action="login.php" method="post" name="login_form">
+                <input type="hidden" name="backlink" value="<?php echo $backlink?>">
+                <input type="hidden" name="csrf" id="csrf" value="<?php echo $csrf?>">
+                <p>
+                    <span class="label">
+                        <?php echo Translator::translate('UserID')?>
+                    </span>
+                    <input class="medium" name="login" id="login" type="text" value="">
+                </p>
+                <p>
+                    <span class="label">
+                        <?php echo Translator::translate('Password')?>
+                    </span>
+                    <input class="medium" name="passwd" id="passwd" type="password" value="">
+                </p>
+                <p>
+                <input class="ui-button ui-corner-all ui-widget" type="submit" name="logon"
+                    value="<?php echo Translator::translate('Login')?>">
+                </p>
+<?php
+if (getSetting('password_recovery')) {
+    ?>
+                <p>
+                  <a href="recover.php">
+                    <?php echo Translator::translate('ForgotPassword')?>
+                  </a>
+                </p>
+    <?php
 }
-</script>
-
-			<form action="login.php" method="post" name="login_form"
-				onsubmit="createHash();">
-				<input type="hidden" name="backlink" value="<?php echo $backlink?>">
-				<input type="hidden" name="fpasswd" id="fpasswd" value=""> <input
-					type="hidden" name="key" id="key" value="<?php echo $key?>">
-				<p>
-					<span style="width: 100px; display: inline-block;"><?php echo $GLOBALS['locUserID']?></span>
-					<input class="medium" name="flogin" id="flogin" type="text"
-						value="">
-				</p>
-				<p>
-					<span style="width: 100px; display: inline-block;"><?php echo $GLOBALS['locPassword']?></span>
-					<input class="medium" name="passwd" id="passwd" type="password"
-						value="">
-				</p>
-				<input type="submit" name="logon"
-					value="<?php echo $GLOBALS['locLogin']?>">
-			</form>
-
-		</div>
-	</div>
+?>
+            </form>
+        </div>
+    </div>
 </body>
 </html>

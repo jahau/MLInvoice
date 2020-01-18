@@ -1,252 +1,321 @@
 <?php
-/*******************************************************************************
- MLInvoice: web-based invoicing application.
- Copyright (C) 2010-2015 Ere Maijala
- 
- Portions based on:
- PkLasku : web-based invoicing software.
- Copyright (C) 2004-2008 Samu Reinikainen
- 
- This program is free software. See attached LICENSE.
- 
- *******************************************************************************/
-
-/*******************************************************************************
- MLInvoice: web-pohjainen laskutusohjelma.
- Copyright (C) 2010-2015 Ere Maijala
- 
- Perustuu osittain sovellukseen:
- PkLasku : web-pohjainen laskutusohjelmisto.
- Copyright (C) 2004-2008 Samu Reinikainen
- 
- Tämä ohjelma on vapaa. Lue oheinen LICENSE.
- 
- *******************************************************************************/
+/**
+ * Navigation menu
+ *
+ * PHP version 5
+ *
+ * Copyright (C) 2004-2008 Samu Reinikainen
+ * Copyright (C) 2010-2018 Ere Maijala
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2,
+ * as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * @category MLInvoice
+ * @package  MLInvoice\Base
+ * @author   Ere Maijala <ere@labs.fi>
+ * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
+ * @link     http://labs.fi/mlinvoice.eng.php
+ */
 require_once 'sqlfuncs.php';
 require_once 'sessionfuncs.php';
 require_once 'miscfuncs.php';
+require_once 'memory.php';
 
+/**
+ * Create a function menu
+ *
+ * @param string $strFunc Function
+ *
+ * @return void
+ */
 function createFuncMenu($strFunc)
 {
     $strHiddenTerm = '';
     $strNewButton = '';
     $strFormName = '';
     $strExtSearchTerm = '';
-    $blnShowSearch = FALSE;
-    
+    $blnShowSearch = false;
+
     switch ($strFunc) {
-    case 'system' :
+    case 'system':
         $astrNaviLinks = [
             [
-                'href' => 'list=user', 
-                'text' => $GLOBALS['locUsers'], 
+                'href' => 'list=user',
+                'text' => Translator::translate('Users'),
                 'levels_allowed' => [
                     ROLE_ADMIN
                 ]
-            ], 
+            ],
             [
-                'href' => 'list=invoice_state', 
-                'text' => $GLOBALS['locInvoiceStates'], 
+                'href' => 'list=invoice_state',
+                'text' => Translator::translate('InvoiceStates'),
                 'levels_allowed' => [
                     ROLE_ADMIN
                 ]
-            ], 
+            ],
             [
-                'href' => 'list=row_type', 
-                'text' => $GLOBALS['locRowTypes'], 
+                'href' => 'list=invoice_type',
+                'text' => Translator::translate('InvoiceTypes'),
                 'levels_allowed' => [
                     ROLE_ADMIN
                 ]
-            ], 
+            ],
             [
-                'href' => 'list=delivery_terms', 
-                'text' => $GLOBALS['locDeliveryTerms'], 
+                'href' => 'list=row_type',
+                'text' => Translator::translate('RowTypes'),
                 'levels_allowed' => [
                     ROLE_ADMIN
                 ]
-            ], 
+            ],
             [
-                'href' => 'list=delivery_method', 
-                'text' => $GLOBALS['locDeliveryMethods'], 
+                'href' => 'list=delivery_terms',
+                'text' => Translator::translate('DeliveryTerms'),
                 'levels_allowed' => [
                     ROLE_ADMIN
                 ]
-            ], 
+            ],
             [
-                'href' => 'list=print_template', 
-                'text' => $GLOBALS['locPrintTemplates'], 
+                'href' => 'list=delivery_method',
+                'text' => Translator::translate('DeliveryMethods'),
                 'levels_allowed' => [
                     ROLE_ADMIN
                 ]
-            ], 
+            ],
             [
-                'href' => 'operation=dbdump', 
-                'text' => $GLOBALS['locBackupDatabase'], 
-                'levels_allowed' => [
-                    ROLE_BACKUPMGR, 
-                    ROLE_ADMIN
-                ]
-            ], 
-            [
-                'href' => 'operation=import', 
-                'text' => $GLOBALS['locImportData'], 
+                'href' => 'list=print_template',
+                'text' => Translator::translate('PrintTemplates'),
                 'levels_allowed' => [
                     ROLE_ADMIN
                 ]
-            ], 
+            ],
             [
-                'href' => 'operation=export', 
-                'text' => $GLOBALS['locExportData'], 
+                'href' => 'operation=dbdump',
+                'text' => Translator::translate('BackupDatabase'),
+                'levels_allowed' => [
+                    ROLE_BACKUPMGR,
+                    ROLE_ADMIN
+                ]
+            ],
+            [
+                'href' => 'operation=import',
+                'text' => Translator::translate('ImportData'),
+                'levels_allowed' => [
+                    ROLE_ADMIN
+                ]
+            ],
+            [
+                'href' => 'operation=export',
+                'text' => Translator::translate('ExportData'),
+                'levels_allowed' => [
+                    ROLE_ADMIN
+                ]
+            ],
+            [
+                'href' => 'operation=update',
+                'text' => Translator::translate('Update'),
                 'levels_allowed' => [
                     ROLE_ADMIN
                 ]
             ]
         ];
         $strNewText = '';
-        $strList = getRequest('list', '');
+        $strList = getPostOrQuery('list', '');
         switch ($strList) {
-        case 'user' :
-            $strNewText = $GLOBALS['locNewUser'];
+        case 'user':
+            $strNewText = Translator::translate('NewUser');
             break;
-        case 'session_type' :
-            $strNewText = $GLOBALS['locNewSessionType'];
+        case 'session_type':
+            $strNewText = Translator::translate('NewSessionType');
             break;
-        case 'invoice_state' :
-        case 'row_type' :
-        case 'delivery_terms' :
-        case 'delivery_method' :
-        case 'print_template' :
-            $strNewText = $GLOBALS['locAddNew'];
+        case 'invoice_state':
+        case 'invoice_type':
+        case 'row_type':
+        case 'delivery_terms':
+        case 'delivery_method':
+        case 'print_template':
+            $strNewText = Translator::translate('AddNew');
             break;
         }
-        if ($strNewText)
-            $strNewButton = "<br/><br/><a class=\"buttonlink new_button\" href=\"?func=system&amp;list=$strList&amp;form=$strList\">$strNewText</a>";
+        if ($strNewText) {
+            $strNewButton = "<br/><br/><a class=\"buttonlink ui-button ui-corner-all ui-widget new_button\""
+                . " href=\"?func=system&amp;list=$strList&amp;form=$strList\">$strNewText</a>";
+        }
         break;
-    
-    case 'settings' :
+
+    case 'settings':
         $astrNaviLinks = [
             [
-                'href' => 'list=settings', 
-                'text' => $GLOBALS['locGeneralSettings'], 
+                'href' => 'list=settings',
+                'text' => Translator::translate('GeneralSettings'),
                 'levels_allowed' => [
-                    ROLE_USER, 
+                    ROLE_ADMIN
+                ]
+            ],
+            [
+                'href' => 'list=base',
+                'text' => Translator::translate('Bases'),
+                'levels_allowed' => [
+                    ROLE_USER,
                     ROLE_BACKUPMGR
                 ]
-            ], 
+            ],
             [
-                'href' => 'list=base', 
-                'text' => $GLOBALS['locBases'], 
+                'href' => 'list=product',
+                'text' => Translator::translate('Products'),
                 'levels_allowed' => [
-                    ROLE_USER, 
+                    ROLE_USER,
                     ROLE_BACKUPMGR
                 ]
-            ], 
+            ],
             [
-                'href' => 'list=product', 
-                'text' => $GLOBALS['locProducts'], 
+                'href' => 'list=default_value',
+                'text' => Translator::translate('DefaultValues'),
                 'levels_allowed' => [
-                    ROLE_USER, 
+                    ROLE_USER,
+                    ROLE_BACKUPMGR
+                ]
+            ],
+            [
+                'href' => 'list=attachment',
+                'text' => Translator::translate('Attachments'),
+                'levels_allowed' => [
+                    ROLE_USER,
                     ROLE_BACKUPMGR
                 ]
             ]
         ];
         $strNewText = '';
-        $strList = getRequest('list', '');
-        switch ($strList) {
-        case 'base' :
-            $strNewText = $GLOBALS['locNewBase'];
-            break;
-        case 'product' :
-            $strNewText = $GLOBALS['locNewProduct'];
-            break;
+        $form = getPostOrQuery('form', '');
+        if (!$form) {
+            $strList = getPostOrQuery('list', '');
+            switch ($strList) {
+            case 'base':
+                $strNewText = Translator::translate('NewBase');
+                break;
+            case 'product':
+                $strNewText = Translator::translate('NewProduct');
+                break;
+            case 'default_value':
+                $strNewText = Translator::translate('NewDefaultValue');
+                break;
+            case 'attachment':
+                $strNewText = Translator::translate('NewAttachment');
+                break;
+            }
+            if ($strNewText) {
+                $strNewButton = "<br/><br/><a class=\"buttonlink ui-button ui-corner-all ui-widget\" "
+                    . "href=\"?func=settings&amp;list=$strList&amp;form=$strList\">$strNewText</a>";
+            }
         }
-        if ($strNewText)
-            $strNewButton = "<br/><br/><a class=\"buttonlink\" href=\"?func=settings&amp;list=$strList&amp;form=$strList\">$strNewText</a>";
         break;
-    
-    case 'reports' :
+
+    case 'reports':
         $astrNaviLinks = [
             [
-                'href' => 'form=invoice', 
-                'text' => $GLOBALS['locInvoiceReport'], 
+                'href' => 'form=invoice',
+                'text' => Translator::translate('InvoiceReport'),
                 'levels_allowed' => [
-                    ROLE_READONLY, 
-                    ROLE_USER, 
+                    ROLE_READONLY,
+                    ROLE_USER,
                     ROLE_BACKUPMGR
                 ]
-            ], 
+            ],
             [
-                'href' => 'form=product', 
-                'text' => $GLOBALS['locProductReport'], 
+                'href' => 'form=product',
+                'text' => Translator::translate('ProductReport'),
                 'levels_allowed' => [
-                    ROLE_READONLY, 
-                    ROLE_USER, 
+                    ROLE_READONLY,
+                    ROLE_USER,
                     ROLE_BACKUPMGR
                 ]
-            ], 
+            ],
             [
-                'href' => 'form=product_stock', 
-                'text' => $GLOBALS['locProductStockReport'], 
+                'href' => 'form=product_stock',
+                'text' => Translator::translate('ProductStockReport'),
                 'levels_allowed' => [
-                    ROLE_READONLY, 
-                    ROLE_USER, 
+                    ROLE_READONLY,
+                    ROLE_USER,
+                    ROLE_BACKUPMGR
+                ]
+            ],
+            [
+                'href' => 'form=accounting',
+                'text' => Translator::translate('AccountingReport'),
+                'levels_allowed' => [
+                    ROLE_READONLY,
+                    ROLE_USER,
                     ROLE_BACKUPMGR
                 ]
             ]
         ];
         break;
-    
-    case 'companies' :
-        $blnShowSearch = TRUE;
+
+    case 'company':
+        $blnShowSearch = true;
         $strOpenForm = 'company';
         $strFormName = 'company';
         $strFormSwitch = 'company';
         $astrNaviLinks = [];
-        $strNewButton = '<a class="buttonlink" href="?func=companies&amp;form=company">' .
-             $GLOBALS['locNewClient'] . '</a>';
+        $strNewButton = '<a class="buttonlink ui-button ui-corner-all ui-widget" href="?func=company&amp;form=company">'
+             . Translator::translate('NewClient') . '</a>';
         break;
-    
-    default :
-        $blnShowSearch = TRUE;
+
+    case 'profile':
+        $astrNaviLinks = [];
+        break;
+
+    default:
+        $blnShowSearch = true;
         $strFormName = 'invoice';
         $astrNaviLinks = [];
-        if ($strFunc == 'open_invoices')
+        if ($strFunc == 'open_invoices') {
             $astrNaviLinks[] = [
-                'href' => 'index.php?func=invoices', 
-                'text' => $GLOBALS['locDisplayAllInvoices'], 
+                'href' => 'index.php?func=invoices',
+                'text' => Translator::translate('DisplayAllInvoices'),
                 'levels_allowed' => [
-                    ROLE_USER, 
+                    ROLE_USER,
                     ROLE_BACKUPMGR
                 ]
             ];
-        else
+        } elseif ($strFunc != 'archived_invoices') {
             $astrNaviLinks[] = [
-                'href' => 'index.php?func=open_invoices', 
-                'text' => $GLOBALS['locDisplayOpenInvoices'], 
+                'href' => 'index.php?func=open_invoices',
+                'text' => Translator::translate('DisplayOpenInvoices'),
                 'levels_allowed' => [
-                    ROLE_USER, 
-                    ROLE_BACKUPMGR
-                ]
-            ];
-        if ($strFunc != 'archived_invoices') {
-            $strNewButton = '<a class="buttonlink" href="?func=invoices&amp;form=invoice">' .
-                 $GLOBALS['locNewInvoice'] . '</a>';
-            $astrNaviLinks[] = [
-                'href' => 'index.php?func=import_statement', 
-                'text' => $GLOBALS['locImportAccountStatement'], 
-                'levels_allowed' => [
-                    ROLE_USER, 
+                    ROLE_USER,
                     ROLE_BACKUPMGR
                 ]
             ];
         }
-        $strFunc = 'invoices';
+        if ($strFunc != 'archived_invoices') {
+            $strNewButton = ' <a class="buttonlink ui-button ui-corner-all ui-widget" href="?func=invoices&amp;form=invoice&amp;offer=1">' .
+                 Translator::translate('NewOffer') . '</a>';
+            $strNewButton .= ' <a class="buttonlink ui-button ui-corner-all ui-widget" href="?func=invoices&amp;form=invoice">' .
+                 Translator::translate('NewInvoice') . '</a>';
+            $astrNaviLinks[] = [
+                'href' => 'index.php?func=import_statement',
+                'text' => Translator::translate('ImportAccountStatement'),
+                'levels_allowed' => [
+                    ROLE_USER,
+                    ROLE_BACKUPMGR
+                ]
+            ];
+        }
         break;
     }
-    
+
     ?>
-<script type="text/javascript">
-  <!--
+<script>
   function openSearchWindow(mode, event) {
       x = event.screenX;
       y = event.screenY;
@@ -264,56 +333,91 @@ function createFuncMenu($strFunc)
           windowname = 'quicksearch';
       }
 
-      var win = window.open(strLink, windowname, 'height='+height+',width='+width+',screenX=' + x + ',screenY=' + y + ',left=' + x + ',top=' + y + ',menubar=no,scrollbars=yes,status=no,toolbar=no');
+      var win = window.open(
+          strLink, windowname,
+          'height='+height+',width='+width+',screenX=' + x + ',screenY=' + y
+          + ',left=' + x + ',top=' + y
+          + ',menubar=no,scrollbars=yes,status=no,toolbar=no'
+      );
       win.focus();
 
       return true;
   }
-  -->
-  </script>
-<div class="function_navi">
-<?php
-    foreach ($astrNaviLinks as $link) {
-        if (sesAccessLevel($link['levels_allowed']) || sesAdminAccess()) {
-            if (strchr($link['href'], '?') === FALSE)
-                $strHref = "?func=$strFunc&amp;" . $link['href'];
-            else
-                $strHref = $link['href'];
-            $class = '';
-            if (strpos($link['href'], '?')) {
-                list (, $urlParams) = explode('?', $link['href'], 2);
-            } else {
-                $urlParams = $link['href'];
+</script>
+    <?php
+    if ($astrNaviLinks || $blnShowSearch || $strNewButton) {
+        ?>
+    <div class="function_navi">
+        <?php
+        foreach ($astrNaviLinks as $link) {
+            if (sesAccessLevel($link['levels_allowed']) || sesAdminAccess()) {
+                if (strchr($link['href'], '?') === false) {
+                    $strHref = "?func=$strFunc&amp;" . $link['href'];
+                } else {
+                    $strHref = $link['href'];
+                }
+                $class = '';
+                if (strpos($link['href'], '?')) {
+                    list(, $urlParams) = explode('?', $link['href'], 2);
+                } else {
+                    $urlParams = $link['href'];
+                }
+                parse_str($urlParams, $linkParts);
+                if ((!isset($linkParts['func'])
+                    || getPostOrQuery('func', '') == $linkParts['func']) && (!isset($linkParts['list'])
+                    || getPostOrQuery('list', '') == $linkParts['list']) && (!isset($linkParts['form'])
+                    || getPostOrQuery('form', '') == $linkParts['form']) && (!isset($linkParts['operation'])
+                    || getPostOrQuery('operation', '') == $linkParts['operation'])
+                ) {
+                    $class = ' ui-state-highlight';
+                }
+                ?>
+        <a class="buttonlink ui-button ui-corner-all ui-widget<?php echo $class?>"
+            href="<?php echo $strHref?>"><?php echo $link['text']?></a>
+                <?php
             }
-            parse_str($urlParams, $linkParts);
-            if ((!isset($linkParts['func']) ||
-                 getRequest('func', '') == $linkParts['func']) && (!isset(
-                    $linkParts['list']) ||
-                 getRequest('list', '') == $linkParts['list']) && (!isset(
-                    $linkParts['form']) ||
-                 getRequest('form', '') == $linkParts['form']) && (!isset(
-                    $linkParts['operation']) ||
-                 getRequest('operation', '') == $linkParts['operation'])) {
-                $class = ' ui-state-highlight';
-            }
+        }
+        if ($blnShowSearch) {
             ?>
-    <a class="buttonlink<?php echo $class?>"
-		href="<?php echo $strHref?>"><?php echo $link['text']?></a>
-<?php
+        <a class="buttonlink ui-button ui-corner-all ui-widget" href="#"
+            onClick="openSearchWindow('ext', event); return false;"><?php echo Translator::translate('ExtSearch')?></a>
+        <a class="buttonlink ui-button ui-corner-all ui-widget" href="#"
+            onClick="openSearchWindow('quick', event); return false;"><?php echo Translator::translate('QuickSearch')?></a>
+            <?php
+        }
+        if (sesWriteAccess()) {
+            echo "&nbsp; &nbsp; $strNewButton\n";
+        }
+        ?>
+    </div>
+        <?php
+    }
+}
+
+/**
+ * Update navigation history in session
+ *
+ * @param string $title Entry title
+ * @param string $url   Entry url
+ * @param int    $level Entry level
+ *
+ * @return Updated history
+ */
+function updateNavigationHistory($title, $url, $level)
+{
+    $arrNew = [];
+    $history = Memory::get('history') ?: [];
+    foreach ($history as $item) {
+        if ($item['level'] < $level) {
+            $arrNew[] = $item;
         }
     }
-    if ($blnShowSearch) {
-        ?>
-    <a class="buttonlink" href="#"
-		onClick="openSearchWindow('ext', event); return false;"><?php echo $GLOBALS['locExtSearch']?></a>
-	<a class="buttonlink" href="#"
-		onClick="openSearchWindow('quick', event); return false;"><?php echo $GLOBALS['locQuickSearch']?></a>
-<?php
-    }
-    if (sesWriteAccess()) {
-        echo "&nbsp; &nbsp; $strNewButton\n";
-    }
-    ?>
-  </div>
-<?php
+    $arrNew[] = [
+        'title' => $title,
+        'url' => $url,
+        'level' => $level
+    ];
+    Memory::set('history', $arrNew);
+
+    return $arrNew;
 }

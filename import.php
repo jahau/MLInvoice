@@ -1,23 +1,43 @@
 <?php
-/*******************************************************************************
- MLInvoice: web-based invoicing application.
- Copyright (C) 2010-2015 Ere Maijala
-
- This program is free software. See attached LICENSE.
-
- *******************************************************************************/
-
-/*******************************************************************************
- MLInvoice: web-pohjainen laskutusohjelma.
- Copyright (C) 2010-2015 Ere Maijala
-
- Tämä ohjelma on vapaa. Lue oheinen LICENSE.
-
- *******************************************************************************/
-require_once 'localize.php';
+/**
+ * Import base class
+ *
+ * PHP version 5
+ *
+ * Copyright (C) 2010-2018 Ere Maijala
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2,
+ * as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * @category MLInvoice
+ * @package  MLInvoice\Base
+ * @author   Ere Maijala <ere@labs.fi>
+ * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
+ * @link     http://labs.fi/mlinvoice.eng.php
+ */
+require_once 'translator.php';
 require_once 'miscfuncs.php';
 require_once 'settings.php';
 
+/**
+ * Base class for import functions
+ *
+ * @category MLInvoice
+ * @package  MLInvoice\Base
+ * @author   Ere Maijala <ere@labs.fi>
+ * @license  https://opensource.org/licenses/GPL-2.0 GNU Public License 2.0
+ * @link     http://github.com/emaijala/MLInvoice
+ */
 class ImportFile
 {
     protected $tableName = '';
@@ -27,38 +47,111 @@ class ImportFile
     protected $decimalSeparator = false;
     protected $ignoreEmptyRows = false;
     protected $presets = [];
+    protected $requireDuplicateCheck = true;
+    protected $mappingsForXml = false;
 
+    /**
+     * Settings for fixed width file import (format=fixed). Keyed array:
+     *
+     * [
+     *     ['name' => 'heading', 'len' => 7, 'filter' => [3, 'ok']],
+     *     ['name' => 'heading2', 'len' => 10]
+     * ]
+     *
+     * @var array
+     */
+    protected $fixedWidthSettings = [];
+
+    /**
+     * Name of the fixed-width format
+     *
+     * @var string
+     */
+    protected $fixedWidthName = 'Fixed';
+
+    /**
+     * Available character sets
+     */
+    protected $charsets = [
+        'UTF-8',
+        'ISO-8859-1',
+        'ISO-8859-15',
+        'Windows-1251',
+        'UTF-16',
+        'UTF-16LE',
+        'UTF-16BE'
+    ];
+
+    /**
+     * Available date formats
+     */
+    protected $dateFormats = [
+        'd.m.Y',
+        'd-m-Y',
+        'd/m/Y',
+        'Y.m.d',
+        'Y-m-d',
+        'Y/m/d',
+        'm.d.Y',
+        'm-d-Y',
+        'm/d/Y',
+        'ymd'
+    ];
+
+    /**
+     * Whether admin access is required
+     *
+     * @var bool
+     */
+    protected $requireAdmin = true;
+
+    /**
+     * Constructor
+     */
     public function __construct()
     {
     }
 
+    /**
+     * Start import
+     *
+     * @return void
+     */
     public function launch()
     {
-        $filetype = getRequest('filetype', '');
+        if (($this->requireAdmin && !sesAdminAccess()) || !sesWriteAccess()) {
+            header('HTTP/1.1 403 Forbidden');
+            return;
+        }
+
+        $filetype = getPostOrQuery('filetype', '');
 
         $error = '';
         if ($filetype == 'upload') {
             if ($_FILES['data']['error'] == UPLOAD_ERR_OK) {
-                $_SESSION['import_file'] = $_FILES['data']['tmp_name'] .
-                     '-mlinvoice-import';
-                move_uploaded_file($_FILES['data']['tmp_name'],
-                    $_SESSION['import_file']);
-                $this->show_setup_form();
+                $_SESSION['import_file'] = $_FILES['data']['tmp_name']
+                     . '-mlinvoice-import';
+                move_uploaded_file(
+                    $_FILES['data']['tmp_name'], $_SESSION['import_file']
+                );
+                $this->showSetupForm();
                 return;
             }
-            $error = $GLOBALS['locErrFileUploadFailed'];
+            $error = Translator::translate('ErrFileUploadFailed');
         } elseif ($this->allowServerFile && $filetype == 'server_file') {
             if (_IMPORT_FILE_ && file_exists(_IMPORT_FILE_)) {
                 $_SESSION['import_file'] = _IMPORT_FILE_;
-                $this->show_setup_form();
+                $this->showSetupForm();
                 return;
             }
-            $error = $GLOBALS['locErrImportFileNotFound'];
+            $error = Translator::translate('ErrImportFileNotFound');
         }
 
-        $importMode = getRequest('import', '');
-        if ($importMode == 'import' || $importMode == 'preview') {
-            $this->import_file($importMode);
+        $importMode = getPostOrQuery('import', '');
+        if (($importMode == 'import' || $importMode == 'preview')
+            && isset($_SESSION['import_file'])
+        ) {
+            $this->importFile($importMode);
             return;
         }
 
@@ -68,107 +161,126 @@ class ImportFile
         ?>
 
 <div class="form_container">
-    <?php if ($error) echo "<div class=\"error\">$error</div>\n"?>
-    <h1><?php echo $GLOBALS['locImportFileSelection']?></h1>
-	<span id="imessage" style="display: none"></span> <span id="spinner"
-		style="visibility: hidden"><img src="images/spinner.gif" alt=""></span>
-	<form id="form_import" enctype="multipart/form-data" method="POST">
-		<input type="hidden" name="func"
-			value="<?php echo htmlentities(getRequest('func', ''))?>"> <input
-			type="hidden" name="operation" value="import">
-		<div class="label"
-			style="clear: both; margin-top: 10px; margin-bottom: 4px">
-			<input type="radio" id="ft_upload" name="filetype" value="upload"
-				checked="checked"><label for="ft_upload"><?php printf($GLOBALS['locImportUploadFile'], $maxFileSize)?></label>
-		</div>
-		<div class="long">
-			<input name="data" type="file">
-		</div>
-<?php if ($this->allowServerFile) {?>
-      <div class="label" style="clear: both; margin-top: 10px">
-			<input type="radio" id="ft_server" name="filetype"
-				value="server_file"><label for="ft_server"><?php echo $GLOBALS['locImportUseServerFile']?></label>
-		</div>
-<?php }?>
-      <div class="form_buttons" style="clear: both">
-			<input type="submit" value="<?php echo $GLOBALS['locImportNext']?>">
-		</div>
-	</form>
+        <?php
+        if ($error) {
+            echo "<div class=\"error\">$error</div>\n";
+        }
+        ?>
+    <h1><?php echo Translator::translate('ImportFileSelection')?></h1>
+    <span id="imessage" style="display: none"></span>
+    <span id="spinner" style="visibility: hidden"><img src="images/spinner.gif" alt=""></span>
+    <form id="form_import" enctype="multipart/form-data" method="POST">
+        <input type="hidden" name="func"
+            value="<?php echo htmlentities(getPostOrQuery('func', ''))?>"> <input
+            type="hidden" name="operation" value="import">
+        <div class="label file">
+            <input type="radio" id="ft_upload" name="filetype" value="upload"
+                checked="checked"><label for="ft_upload"><?php printf(Translator::translate('ImportUploadFile'), $maxFileSize)?></label>
+        </div>
+        <div class="long">
+            <input name="data" type="file">
+        </div>
+        <?php if ($this->allowServerFile) {?>
+        <div class="label file">
+            <input type="radio" id="ft_server" name="filetype"
+                value="server_file"><label for="ft_server"><?php echo Translator::translate('ImportUseServerFile')?></label>
+        </div>
+        <?php }?>
+      <div class="form_buttons">
+            <input type="submit" value="<?php echo Translator::translate('ImportNext')?>">
+        </div>
+    </form>
 </div>
-<?php
+        <?php
     }
 
-    public function create_import_preview()
+    /**
+     * Create an import preview
+     *
+     * @return string JSON
+     */
+    public function createImportPreview()
     {
-        $charset = getRequest('charset', 'UTF-8');
-        $table = getRequest('table', '');
-        $format = getRequest('format', '');
-        $fieldDelimiter = getRequest('field_delim', 'comma');
-        $enclosureChar = getRequest('enclosure_char', 'doublequote');
-        $rowDelimiter = getRequest('row_delim', 'lf');
-        $skipRows = getRequest('skip_rows', 0);
+        $charset = getPostOrQuery('charset', 'UTF-8');
+        $table = getPostOrQuery('table', '');
+        $format = getPostOrQuery('format', '');
+        $fieldDelimiter = getPostOrQuery('field_delim', 'comma');
+        $enclosureChar = getPostOrQuery('enclosure_char', 'doublequote');
+        $rowDelimiter = getPostOrQuery('row_delim', 'lf');
+        $skipRows = getPostOrQuery('skip_rows', 0);
 
-        if (!$charset || !$table || !$format || !$fieldDelimiter || !$enclosureChar ||
-             !$rowDelimiter) {
+        if (!$charset || !$table || !$format || !$fieldDelimiter || !$enclosureChar
+            || !$rowDelimiter
+        ) {
             header('HTTP/1.1 400 Bad Request');
             exit();
         }
-        if (!$this->table_valid($table)) {
+        if (!$this->isTableNameValid($table)) {
             header('HTTP/1.1 400 Bad Request');
             die('Invalid table name');
         }
 
         header('Content-Type: application/json');
+        $response = [];
 
         if ($format == 'csv') {
             $fp = fopen($_SESSION['import_file'], 'r');
             if (!$fp) {
                 echo json_encode(
-                    [
-                        'errors' => [
-                            'Could not open import file for reading'
-                        ]
-                    ]);
+                    ['errors' => ['Could not open import file for reading']]
+                );
                 die(
-                    "Could not open import file '" + $_SESSION['import_file'] +
-                         "' for reading");
+                    "Could not open import file '" . $_SESSION['import_file']
+                    . "' for reading"
+                );
             }
 
-            $field_delims = $this->get_field_delims();
-            $enclosure_chars = $this->get_enclosure_chars();
-            $row_delims = $this->get_row_delims();
+            $field_delims = $this->getFieldDelims();
+            $enclosure_chars = $this->getEnclosureChars();
+            $row_delims = $this->getRowDelims();
 
-            if (!isset($field_delims[$fieldDelimiter]))
+            if (!isset($field_delims[$fieldDelimiter])) {
                 die('Invalid field delimiter');
+            }
             $fieldDelimiter = $field_delims[$fieldDelimiter]['char'];
-            if (!isset($enclosure_chars[$enclosureChar]))
+            if (!isset($enclosure_chars[$enclosureChar])) {
                 die('Invalid enclosure character');
+            }
             $enclosureChar = $enclosure_chars[$enclosureChar]['char'];
-            if (!isset($row_delims[$rowDelimiter]))
+            if (!isset($row_delims[$rowDelimiter])) {
                 die('Invalid field delimiter');
+            }
             $rowDelimiter = $row_delims[$rowDelimiter]['char'];
 
             // Force enclosure char, otherwise fgetcsv would balk.
-            if ($enclosureChar == '')
+            if ($enclosureChar == '') {
                 $enclosureChar = "\x01";
+            }
 
             for ($i = 0; $i < $skipRows; $i ++) {
-                $this->get_csv($fp, $fieldDelimiter, $enclosureChar, $charset,
-                    $rowDelimiter);
+                $this->getCsv(
+                    $fp, $fieldDelimiter, $enclosureChar, $charset, $rowDelimiter
+                );
             }
 
             $errors = [];
-            $headings = $this->get_csv($fp, $fieldDelimiter, $enclosureChar,
-                $charset, $rowDelimiter);
-            if (!$headings)
+            $headings = $this->getCsv(
+                $fp, $fieldDelimiter, $enclosureChar, $charset, $rowDelimiter
+            );
+            if (!$headings) {
                 $errors[] = 'Could not parse headings row from import file';
+            }
             $rows = [];
             for ($i = 0; $i < 10 && !feof($fp); $i ++) {
-                $row = $this->get_csv($fp, $fieldDelimiter, $enclosureChar, $charset,
-                    $rowDelimiter);
-                if (!isset($row)) {
+                $row = $this->getCsv(
+                    $fp, $fieldDelimiter, $enclosureChar, $charset, $rowDelimiter
+                );
+                if (null === $row) {
                     $errors[] = 'Could not read row from import file';
                     break;
+                }
+                if ([] === $row) {
+                    continue;
                 }
                 $rows[] = $row;
             }
@@ -182,50 +294,27 @@ class ImportFile
             $data = file_get_contents($_SESSION['import_file']);
             if ($data === false) {
                 echo json_encode(
-                    [
-                        'errors' => [
-                            'Could not open import file for reading'
-                        ]
-                    ]);
+                    ['errors' => ['Could not open import file for reading']]
+                );
                 die(
-                    "Could not open import file '" + $_SESSION['import_file'] +
-                         "' for reading");
+                    "Could not open import file '" . $_SESSION['import_file']
+                    . "' for reading"
+                );
             }
 
-            if ($charset != _CHARSET_)
+            if ($charset != _CHARSET_) {
                 $data = iconv($charset, _CHARSET_, $data);
+            }
 
             try {
                 $xml = new SimpleXMLElement($data);
             } catch (Exception $e) {
-                echo json_encode(
-                    [
-                        'errors' => [
-                            $e->getMessage()
-                        ]
-                    ]);
+                echo json_encode(['errors' => [$e->getMessage()]]);
                 die('XML parsing failed: ' . htmlspecialchars($e->getMessage()));
             }
-            $recNum = 0;
-            $headings = [];
-            $rows = [];
-            foreach ($xml as $record) {
-                if (++$recNum > 10)
-                    break;
-                $record = get_object_vars($record);
-
-                $row = [];
-                foreach ($record as $column => $value) {
-                    if (!is_array($value) && !is_object($value)) {
-                        if ($recNum == 1)
-                            $headings[] = $column;
-                        $row[] = $value;
-                    }
-                }
-                $rows[] = $row;
-            }
+            $this->getXmlPreviewData($xml, $headings, $rows, $errors);
             $response = [
-                'errors' => [],
+                'errors' => $errors,
                 'headings' => $headings,
                 'rows' => $rows
             ];
@@ -233,28 +322,22 @@ class ImportFile
             $data = file_get_contents($_SESSION['import_file']);
             if ($data === false) {
                 echo json_encode(
-                    [
-                        'errors' => [
-                            'Could not open import file for reading'
-                        ]
-                    ]);
+                    ['errors' => ['Could not open import file for reading']]
+                );
                 error_log(
-                    "Could not open import file '" + $_SESSION['import_file'] +
-                         "' for reading");
+                    "Could not open import file '" . $_SESSION['import_file']
+                    . "' for reading"
+                );
                 exit();
             }
 
-            if ($charset != _CHARSET_)
+            if ($charset != _CHARSET_) {
                 $data = iconv($charset, _CHARSET_, $data);
+            }
 
             $data = json_decode($data, true);
             if ($data === null) {
-                echo json_encode(
-                    [
-                        'errors' => [
-                            'Could not decode JSON'
-                        ]
-                    ]);
+                echo json_encode(['errors' => ['Could not decode JSON']]);
                 error_log('JSON parsing failed');
                 exit();
             }
@@ -263,15 +346,18 @@ class ImportFile
             $rows = [];
 
             foreach (reset($data) as $record) {
-                if (++$recNum > 10)
+                if (++$recNum > 10) {
                     break;
+                }
 
                 $row = [];
                 foreach ($record as $column => $value) {
-                    if (is_array($value))
+                    if (is_array($value)) {
                         continue;
-                    if ($recNum == 1)
+                    }
+                    if ($recNum == 1) {
                         $headings[] = $column;
+                    }
                     $row[] = $value;
                 }
                 $rows[] = $row;
@@ -281,11 +367,57 @@ class ImportFile
                 'headings' => $headings,
                 'rows' => $rows
             ];
+        } elseif ($format == 'fixed') {
+            $data = file_get_contents($_SESSION['import_file']);
+
+            if ($charset != _CHARSET_) {
+                $data = iconv($charset, _CHARSET_, $data);
+            }
+            $recNum = 0;
+            $rows = [];
+            foreach (explode("\n", $data) as $line) {
+                if (++$recNum > 10) {
+                    break;
+                }
+                $line = trim($line, "\r");
+                $pos = 0;
+                $row = [];
+                foreach ($this->fixedWidthSettings as $column) {
+                    $value = substr($line, $pos, $column['len']);
+                    if (!empty($column['filter'])
+                        && !in_array($value, $column['filter'])
+                    ) {
+                        // Ignore line
+                        --$recNum;
+                        continue 2;
+                    }
+                    $row[] = $value;
+                    $pos += $column['len'];
+                }
+                $rows[] = $row;
+            }
+            $headings = array_map(
+                function ($row) {
+                    return $row['name'];
+                },
+                $this->fixedWidthSettings
+            );
+
+            $response = [
+                'errors' => [],
+                'headings' => $headings,
+                'rows' => $rows
+            ];
         }
         echo json_encode($response);
     }
 
-    public function get_row_delims()
+    /**
+     * Get row delimiters
+     *
+     * @return array
+     */
+    public function getRowDelims()
     {
         return [
             'lf' => [
@@ -303,87 +435,141 @@ class ImportFile
         ];
     }
 
-    public function get_field_delims()
+    /**
+     * Get field delimiters
+     *
+     * @return array
+     */
+    public function getFieldDelims()
     {
         return [
             'comma' => [
                 'char' => ',',
-                'name' => $GLOBALS['locImportExportFieldDelimiterComma']
+                'name' => Translator::translate('ImportExportFieldDelimiterComma')
             ],
             'semicolon' => [
                 'char' => ';',
-                'name' => $GLOBALS['locImportExportFieldDelimiterSemicolon']
+                'name' => Translator::translate('ImportExportFieldDelimiterSemicolon')
             ],
             'tab' => [
                 'char' => "\t",
-                'name' => $GLOBALS['locImportExportFieldDelimiterTab']
+                'name' => Translator::translate('ImportExportFieldDelimiterTab')
             ],
             'pipe' => [
                 'char' => '|',
-                'name' => $GLOBALS['locImportExportFieldDelimiterPipe']
+                'name' => Translator::translate('ImportExportFieldDelimiterPipe')
             ],
             'colon' => [
                 'char' => ':',
-                'name' => $GLOBALS['locImportExportFieldDelimiterColon']
+                'name' => Translator::translate('ImportExportFieldDelimiterColon')
             ]
         ];
     }
 
-    public function get_enclosure_chars()
+    /**
+     * Get enclosure characters
+     *
+     * @return array
+     */
+    public function getEnclosureChars()
     {
         return [
             'doublequote' => [
                 'char' => '"',
-                'name' => $GLOBALS['locImportExportEnclosureDoubleQuote']
+                'name' => Translator::translate('ImportExportEnclosureDoubleQuote')
             ],
             'singlequote' => [
                 'char' => '\'',
-                'name' => $GLOBALS['locImportExportEnclosureSingleQuote']
+                'name' => Translator::translate('ImportExportEnclosureSingleQuote')
             ],
             'none' => [
                 'char' => '',
-                'name' => $GLOBALS['locImportExportEnclosureNone']
+                'name' => Translator::translate('ImportExportEnclosureNone')
             ]
         ];
     }
 
-    public function get_date_formats()
-    {
-        return [
-            'd.m.Y',
-            'd-m-Y',
-            'd/m/Y',
-            'Y.m.d',
-            'Y-m-d',
-            'Y/m/d',
-            'm.d.Y',
-            'm-d-Y',
-            'm/d/Y'
-        ];
-    }
-
-    protected function add_custom_form_fields()
+    /**
+     * Add any custom fields to the form
+     *
+     * @return void
+     */
+    protected function addCustomFormFields()
     {
     }
 
-    protected function get_field_defs($table)
+    /**
+     * Get field definitions for a table
+     *
+     * @param string $table Table name
+     *
+     * @return array
+     */
+    protected function getFieldDefs($table)
     {
-        if (!$this->table_valid($table)) {
+        if (!$this->isTableNameValid($table)) {
             return [];
         }
-        $res = mysqli_query_check("show fields from {prefix}$table");
-        $field_defs = [];
+        $res = dbQueryCheck("show fields from {prefix}$table");
+        $fieldDefs = [];
         while ($row = mysqli_fetch_assoc($res)) {
-            $field_defs[$row['Field']] = $row;
+            $fieldDefs[$row['Field']] = $row;
         }
-        return $field_defs;
+        if ('company' === $table || 'company_contact' === $table) {
+            $fieldDefs['tags'] = ['Type' => 'text'];
+        }
+        if ('custom_price_map' === $table) {
+            $fieldDefs['company_id'] = ['Type' => 'int'];
+        }
+        return $fieldDefs;
     }
 
-    protected function show_setup_form()
+    /**
+     * Get preview data for XML import
+     *
+     * @param SimpleXMLElement $xml      XML
+     * @param array            $headings Resulting headings
+     * @param array            $rows     Resulting rows
+     * @param array            $errors   Any errors
+     *
+     * @return void
+     */
+    protected function getXmlPreviewData($xml, &$headings, &$rows, &$errors)
+    {
+        $headings = [];
+        $rows = [];
+        $errors = [];
+        $recNum = 0;
+        foreach ($xml as $record) {
+            if (++$recNum > 10) {
+                break;
+            }
+            $record = get_object_vars($record);
+
+            $row = [];
+            foreach ($record as $column => $value) {
+                if (!is_array($value) && !is_object($value)) {
+                    if ($recNum == 1) {
+                        $headings[] = $column;
+                    }
+                    $row[] = $value;
+                }
+            }
+            $rows[] = $row;
+        }
+    }
+
+    /**
+     * Display the import setup form
+     *
+     * @return void
+     */
+    protected function showSetupForm()
     {
         $fp = fopen($_SESSION['import_file'], 'r');
-        if (!$fp)
+        if (!$fp) {
             die('Could not open import file for reading');
+        }
 
         $data = fread($fp, 8192);
         $bytesRead = ftell($fp);
@@ -391,6 +577,8 @@ class ImportFile
         fclose($fp);
 
         $charset = 'UTF-8';
+        $dateFormat = $this->dateFormats[0];
+        $decimalSeparator = Translator::translate('DecimalSeparator');
 
         if ($bytesRead > 3) {
             if (ord($data[0]) == 0xFE && ord($data[1]) == 0xFF) {
@@ -412,68 +600,81 @@ class ImportFile
             $format = 'xml';
         } elseif (strtolower(substr(ltrim($data), 0, 1)) == '{') {
             $format = 'json';
+        } elseif ($this->fixedWidthSettings && $this->getDelimiterCount($data) == 0
+        ) {
+            $format = 'fixed';
         } else {
             $format = 'csv';
 
-            $row_delims = $this->get_row_delims();
+            $row_delims = $this->getRowDelims();
             foreach ($row_delims as $key => $value) {
                 $row_delims[$key]['count'] = substr_count($data, $value['char']);
             }
             $selected = reset($row_delims);
             foreach ($row_delims as $key => $value) {
-                if ($value['count'] > 0 && $value['count'] >= $selected['count'] &&
-                     strlen($value['char']) >= strlen($selected['char']))
+                if ($value['count'] > 0 && $value['count'] >= $selected['count']
+                    && strlen($value['char']) >= strlen($selected['char'])
+                ) {
                     $selected = $value;
+                }
             }
             $row_delim = $selected;
 
-            $field_delims = $this->get_field_delims();
+            $field_delims = $this->getFieldDelims();
             $rows = explode($row_delim['char'], $data);
             foreach ($rows as $row) {
                 foreach ($field_delims as $key => $value) {
-                    if (!isset($field_delims[$key]['count']))
+                    if (!isset($field_delims[$key]['count'])) {
                         $field_delims[$key]['count'] = 0;
-                    $field_delims[$key]['count'] += substr_count($row,
-                        $value['char']);
+                    }
+                    $field_delims[$key]['count']
+                        += substr_count($row, $value['char']);
                 }
             }
             $selected = reset($field_delims);
             foreach ($field_delims as $key => $value) {
-                if ($value['count'] > 0 && $value['count'] >= $selected['count'])
+                if ($value['count'] > 0 && $value['count'] >= $selected['count']) {
                     $selected = $value;
+                }
             }
             $field_delim = $selected;
 
-            $enclosure_chars = $this->get_enclosure_chars();
+            $enclosure_chars = $this->getEnclosureChars();
             foreach ($rows as $row) {
-                if ($charset == 'UTF-8' &&
-                     try_iconv($charset, _CHARSET_, $row) === false) {
-                    if (try_iconv('ISO-8859-1', _CHARSET_, $row) !== false)
+                if ($charset == 'UTF-8'
+                    && $this->tryIconv($charset, _CHARSET_, $row) === false
+                ) {
+                    if ($this->tryIconv('ISO-8859-1', _CHARSET_, $row) !== false) {
                         $charset = 'ISO-8859-1';
+                    }
                 }
                 foreach (explode($field_delim['char'], $row) as $field) {
                     foreach ($enclosure_chars as $key => $value) {
-                        if (!isset($enclosure_chars[$key]['count']))
+                        if (!isset($enclosure_chars[$key]['count'])) {
                             $enclosure_chars[$key]['count'] = 0;
-                        if ($value['char'] === '') {
+                        }
+                        $char = $value['char'];
+                        if ($char === '') {
                             continue;
                         }
-                        if (substr($field, 0, strlen($value['char'])) ==
-                             $value['char'] && substr($field,
-                                -strlen($value['char'])) == $value['char'])
-                            $enclosure_chars[$key]['count'] ++;
+                        if (substr($field, 0, strlen($char)) == $char
+                            && substr($field, -strlen($char)) == $char
+                        ) {
+                            $enclosure_chars[$key]['count']++;
+                        }
                     }
                 }
             }
             $selected = $enclosure_chars['none'];
             foreach ($enclosure_chars as $key => $value) {
-                if ($value['count'] > 0 && $value['count'] >= $selected['count'])
+                if ($value['count'] > 0 && $value['count'] >= $selected['count']) {
                     $selected = $value;
+                }
             }
             $enclosure_char = $selected;
         }
         ?>
-<script type="text/javascript">
+<script>
 
 g_presets = <?php echo json_encode($this->presets) . ';'?>
 
@@ -533,8 +734,8 @@ function add_column()
     select.name = "column[]";
     select.onchange = update_columns;
     var option = document.createElement("option");
-    option.value = "";
-    option.text = "<?php echo $GLOBALS['locImportColumnUnused']?>";
+    option.value = '';
+    option.text = "<?php echo Translator::translate('ImportColumnUnused')?>";
     select.options.add(option);
     for (var i = 0; i < json.columns.length; i++)
     {
@@ -545,12 +746,16 @@ function add_column()
     }
     columns.appendChild(document.createTextNode(' '));
     columns.appendChild(select);
+    if (g_column_id == 1) {
+        $(select).find('option[value="id"]').attr('selected', 'selected');
+        $(select).change();
+    }
   });
 }
 
 function settings_changed()
 {
-  $("#preset").val(0);
+  $("#preset").val('');
 }
 
 function update_mapping_table()
@@ -616,7 +821,7 @@ function update_mapping_table()
 function add_mapping_columns(headings)
 {
   var type = document.getElementById('format').value;
-  if (type != 'csv')
+  if (type != 'csv' && type != 'fixed'<?php echo $this->mappingsForXml ? " && type != 'xml'" : '' ?>)
     return;
   var table = document.getElementById("sel_table").value;
   $.getJSON("json.php?func=get_table_columns&table=" + table, function(json) {
@@ -626,7 +831,7 @@ function add_mapping_columns(headings)
     select.onchange = "settings_changed()";
     var option = document.createElement("option");
     option.value = "";
-    option.text = "<?php echo $GLOBALS['locImportExportColumnNone']?>";
+    option.text = "<?php echo Translator::translate('ImportExportColumnNone')?>";
     select.options.add(option);
     for (var i = 0; i < json.columns.length; i++)
     {
@@ -653,9 +858,9 @@ function add_mapping_columns(headings)
       td.appendChild(clone);
       tr.appendChild(td);
     }
-    var name = $("#preset").val();
+    var value = $("#preset").val();
     $.each(g_presets, function(index, preset) {
-      if (preset['name'] == name) {
+      if (preset['value'] == value) {
         $.each(preset['mappings'], function(element, value) {
           var elem = $('#' + element).get(0);
           if (elem) elem.selectedIndex = value;
@@ -667,9 +872,9 @@ function add_mapping_columns(headings)
 
 function select_preset()
 {
-  var name = $("#preset").val();
+  var value = $("#preset").val();
   $.each(g_presets, function(index, preset) {
-    if (preset['name'] == name) {
+    if (preset['value'] == value) {
       $.each(preset['selections'], function(element, value) {
         var elem = $('#' + element).get(0);
         if (elem) elem.selectedIndex = value;
@@ -677,6 +882,7 @@ function select_preset()
       $.each(preset['values'], function(element, value) {
         $('#' + element).val(value);
       });
+      update_field_states();
       update_mapping_table();
     }
   });
@@ -685,298 +891,477 @@ function select_preset()
 </script>
 
 <div class="form_container">
-	<h1><?php echo $GLOBALS['locImportFileParameters']?></h1>
-	<span id="imessage" style="display: none"></span> <span id="spinner"
-		style="visibility: hidden"><img src="images/spinner.gif" alt=""></span>
-	<form id="import_form" name="import_form" method="GET">
-		<input type="hidden" name="func" value="<?php echo htmlentities(getRequest('func', ''))?>">
-	    <input type="hidden" name="operation" value="import">
-<?php if ($this->presets) { ?>
-      <div class="medium_label"><?php echo $GLOBALS['locImportExportPreset']?></div>
-		<div class="field">
-			<select id="preset" name="preset" onchange="select_preset()">
-				<option value="" selected="selected"><?php echo $GLOBALS['locImportExportPresetNone']?></option>
-<?php
-            foreach ($this->presets as $preset) {
-                echo "<option value=\"${preset['name']}\">" . $preset['name'] .
-                     "</option>\n";
+    <h1><?php echo Translator::translate('ImportFileParameters')?></h1>
+    <span id="imessage" style="display: none"></span> <span id="spinner"
+       style="visibility: hidden"><img src="images/spinner.gif" alt=""></span>
+    <form id="import_form" name="import_form" method="GET">
+        <input type="hidden" name="func" value="<?php echo htmlentities(getPostOrQuery('func', ''))?>">
+        <input type="hidden" name="operation" value="import">
+        <?php
+        if ($this->presets) {
+            $presets = $this->presets;
+            $selectedPreset = null;
+            array_unshift($presets, ['name' => Translator::translate('ImportExportPresetNone'), 'value' => '']);
+            foreach ($presets as $preset) {
+                if (isset($preset['default_for']) && $format == $preset['default_for']) {
+                    $selectedPreset = $preset;
+                    if (isset($preset['selections']['charset'])) {
+                        $charset = $this->charsets[$preset['selections']['charset']];
+                    }
+                    if (isset($preset['selections']['date_format'])) {
+                        $dateFormat = $this->dateFormats[$preset['selections']['date_format']];
+                    }
+                    if (isset($preset['values']['decimal_separator'])) {
+                        $decimalSeparator = $preset['values']['decimal_separator'];
+                    }
+                    break;
+                }
             }
             ?>
-        </select>
-		</div>
-<?php } ?>
-
-      <div class="medium_label"><?php echo $GLOBALS['locImportExportCharacterSet']?></div>
-		<div class="field">
-			<select id="charset" name="charset"
-				onchange="settings_changed(); update_mapping_table()">
-				<option value="UTF-8"
-					<?php if ($charset == 'UTF-8') echo ' selected="selected"'?>>UTF-8</option>
-				<option value="ISO-8859-1"
-					<?php if ($charset == 'ISO-8859-1') echo ' selected="selected"'?>>ISO-8859-1</option>
-				<option value="ISO-8859-15"
-					<?php if ($charset == 'ISO-8859-15') echo ' selected="selected"'?>>ISO-8859-15</option>
-				<option value="Windows-1251"
-					<?php if ($charset == 'Windows-1251') echo ' selected="selected"'?>>Windows-1251</option>
-				<option value="UTF-16"
-					<?php if ($charset == 'UTF-16') echo ' selected="selected"'?>>UTF-16</option>
-				<option value="UTF-16LE"
-					<?php if ($charset == 'UTF-16LE') echo ' selected="selected"'?>>UTF-16
-					LE</option>
-				<option value="UTF-16BE"
-					<?php if ($charset == 'UTF-16BE') echo ' selected="selected"'?>>UTF-16
-					BE</option>
-			</select>
-		</div>
-<?php
-        if ($this->tableName) {
-            ?>
-      <input id="sel_table" name="table" type="hidden"
-			value="<?php echo htmlentities($this->tableName)?>"></input>
-<?php
-        } else {
-            ?>
-      <div class="medium_label"><?php echo $GLOBALS['locImportExportTable']?></div>
-		<div class="field">
-			<select id="sel_table" name="table"
-				onchange="reset_columns(); settings_changed(); update_mapping_table()">
-				<option value="company"><?php echo $GLOBALS['locImportExportTableCompanies']?></option>
-				<option value="company_contact"><?php echo $GLOBALS['locImportExportTableCompanyContacts']?></option>
-				<option value="base"><?php echo $GLOBALS['locImportExportTableBases']?></option>
-				<option value="invoice"><?php echo $GLOBALS['locImportExportTableInvoices']?></option>
-				<option value="invoice_row"><?php echo $GLOBALS['locImportExportTableInvoiceRows']?></option>
-				<option value="product"><?php echo $GLOBALS['locImportExportTableProducts']?></option>
-				<option value="row_type"><?php echo $GLOBALS['locImportExportTableRowTypes']?></option>
-				<option value="invoice_state"><?php echo $GLOBALS['locImportExportTableInvoiceStates']?></option>
-			</select>
-		</div>
-<?php
+            <div class="medium_label"><?php echo Translator::translate('ImportExportPreset')?></div>
+            <div class="field">
+                <select id="preset" name="preset" onchange="select_preset()">
+                <?php
+                foreach ($this->presets as $preset) {
+                    echo "<option value=\"{$preset['value']}\""
+                        . ($selectedPreset['value'] == $preset['value'] ? ' selected="selected"' : '')
+                        . '>' . $preset['name'] . "</option>\n";
+                }
+                ?>
+                </select>
+            </div>
+            <?php
         }
         ?>
 
-      <div class="medium_label"><?php echo $GLOBALS['locImportExportFormat']?></div>
-		<div class="field">
-			<select id="format" name="format"
-				onchange="update_field_states(); reset_columns(); settings_changed(); update_mapping_table()">
-				<option value="csv"
-					<?php if ($format == 'csv') echo ' selected="selected"'?>>CSV</option>
-				<option value="xml"
-					<?php if ($format == 'xml') echo ' selected="selected"'?>>XML</option>
-				<option value="json"
-					<?php if ($format == 'json') echo ' selected="selected"'?>>JSON</option>
-			</select>
-		</div>
+        <div class="medium_label"><?php echo Translator::translate('ImportExportCharacterSet')?></div>
+        <div class="field">
+            <select id="charset" name="charset"
+                onchange="settings_changed(); update_mapping_table()">
+            <?php foreach ($this->charsets as $value) { ?>
+                <option value="<?php echo $value ?>"<?php if ($value == $charset) echo ' selected="selected"'?>><?php echo $value ?></option>
+            <?php } ?>
+            </select>
+        </div>
+        <?php
+        if ($this->tableName) {
+            ?>
+        <input id="sel_table" name="table" type="hidden" value="<?php echo htmlentities($this->tableName)?>">
+            <?php
+        } else {
+            ?>
+        <div class="medium_label"><?php echo Translator::translate('ImportExportTable')?></div>
+        <div class="field">
+            <select id="sel_table" name="table"
+                onchange="reset_columns(); settings_changed(); update_mapping_table()">
+                <option value="company"><?php echo Translator::translate('ImportExportTableCompanies')?></option>
+                <option value="company_contact"><?php echo Translator::translate('ImportExportTableCompanyContacts')?></option>
+                <option value="base"><?php echo Translator::translate('ImportExportTableBases')?></option>
+                <option value="invoice"><?php echo Translator::translate('ImportExportTableInvoices')?></option>
+                <option value="invoice_row"><?php echo Translator::translate('ImportExportTableInvoiceRows')?></option>
+                <option value="product"><?php echo Translator::translate('ImportExportTableProducts')?></option>
+                <option value="row_type"><?php echo Translator::translate('ImportExportTableRowTypes')?></option>
+                <option value="invoice_state"><?php echo Translator::translate('ImportExportTableInvoiceStates')?></option>
+                <option value="delivery_terms"><?php echo Translator::translate('ImportExportTableDeliveryTerms')?></option>
+                <option value="delivery_method"><?php echo Translator::translate('ImportExportTableDeliveryMethods')?></option>
+                <option value="stock_balance_log"><?php echo Translator::translate('ImportExportTableStockBalanceLog')?></option>
+                <option value="default_value"><?php echo Translator::translate('ImportExportTableDefaultValues')?></option>
+                <option value="custom_price"><?php echo Translator::translate('ImportExportTableCustomPrices')?></option>
+                <option value="custom_price_map"><?php echo Translator::translate('ImportExportTableCustomPriceMaps')?></option>
+            </select>
+        </div>
+            <?php
+        }
+        ?>
 
-		<div class="medium_label"><?php echo $GLOBALS['locImportExportFieldDelimiter']?></div>
-		<div class="field">
-			<select id="field_delim" name="field_delim"
-				onchange="settings_changed(); update_mapping_table()">
-<?php
-        $field_delims = $this->get_field_delims();
+        <div class="medium_label"><?php echo Translator::translate('ImportExportFormat')?></div>
+        <div class="field">
+            <select id="format" name="format"
+                onchange="update_field_states(); reset_columns(); settings_changed(); update_mapping_table()">
+                <option value="csv"<?php if ($format == 'csv') echo ' selected="selected"'?>>CSV</option>
+                <option value="xml"<?php if ($format == 'xml') echo ' selected="selected"'?>>XML</option>
+                <option value="json"<?php if ($format == 'json') echo ' selected="selected"'?>>JSON</option>
+        <?php
+        if ($this->fixedWidthSettings) {
+            ?>
+                <option value="fixed"<?php if ($format == 'fixed') echo ' selected="selected"'?>><?php echo $this->fixedWidthName ?></option>
+            <?php
+        }
+        ?>
+            </select>
+        </div>
+
+        <div class="medium_label"><?php echo Translator::translate('ImportExportFieldDelimiter')?></div>
+        <div class="field">
+            <select id="field_delim" name="field_delim"
+                onchange="settings_changed(); update_mapping_table()">
+        <?php
+        $field_delims = $this->getFieldDelims();
         foreach ($field_delims as $key => $delim) {
             $selected = (isset($field_delim) && $field_delim['name'] ==
                  $delim['name']) ? ' selected="selected"' : '';
-            echo "<option value=\"$key\"$selected>" . $delim['name'] . "</option>\n";
+            echo "                <option value=\"$key\"$selected>" . $delim['name'] . "</option>\n";
         }
         ?>
-        </select>
-		</div>
+            </select>
+        </div>
 
-		<div class="medium_label"><?php echo $GLOBALS['locImportExportEnclosureCharacter']?></div>
-		<div class="field">
-			<select id="enclosure_char" name="enclosure_char"
-				onchange="settings_changed(); update_mapping_table()">
-<?php
-        $enclosure_chars = $this->get_enclosure_chars();
+        <div class="medium_label"><?php echo Translator::translate('ImportExportEnclosureCharacter')?></div>
+        <div class="field">
+            <select id="enclosure_char" name="enclosure_char"
+                onchange="settings_changed(); update_mapping_table()">
+        <?php
+        $enclosure_chars = $this->getEnclosureChars();
         foreach ($enclosure_chars as $key => $delim) {
             $selected = (isset($enclosure_char) &&
                  $enclosure_char['name'] == $delim['name']) ? ' selected="selected"' : '';
-            echo "<option value=\"$key\"$selected>" . $delim['name'] . "</option>\n";
+            echo "                <option value=\"$key\"$selected>" . $delim['name'] . "</option>\n";
         }
         ?>
-        </select>
-		</div>
+            </select>
+        </div>
 
-		<div class="medium_label"><?php echo $GLOBALS['locImportExportRowDelimiter']?></div>
-		<div class="field">
-			<select id="row_delim" name="row_delim"
-				onchange="settings_changed(); update_mapping_table()">
-<?php
-        $row_delims = $this->get_row_delims();
+        <div class="medium_label"><?php echo Translator::translate('ImportExportRowDelimiter')?></div>
+        <div class="field">
+            <select id="row_delim" name="row_delim"
+                onchange="settings_changed(); update_mapping_table()">
+        <?php
+        $row_delims = $this->getRowDelims();
         foreach ($row_delims as $key => $delim) {
             $selected = (isset($row_delim) && $row_delim['name'] == $delim['name']) ? ' selected="selected"' : '';
-            echo "<option value=\"$key\"$selected>" . $delim['name'] . "</option>\n";
+            echo "                <option value=\"$key\"$selected>" . $delim['name'] . "</option>\n";
         }
         ?>
-        </select>
-		</div>
+            </select>
+        </div>
 
-<?php if ($this->dateFormat) {?>
-      <div class="medium_label"><?php echo $GLOBALS['locImportExportDateFormat']?></div>
-		<div class="field">
-			<select id="date_format" name="date_format"
-				onchange="settings_changed()">
-<?php
-            $selected = ' selected="selected"';
-            foreach ($this->get_date_formats() as $fmt) {
+        <?php
+        if ($this->dateFormat) {
+            ?>
+        <div class="medium_label"><?php echo Translator::translate('ImportExportDateFormat')?></div>
+        <div class="field">
+            <select id="date_format" name="date_format" onchange="settings_changed()">
+            <?php
+            foreach ($this->dateFormats as $fmt) {
                 ?>
-          <option value="<?php echo $fmt?>" <?php echo $selected?>><?php echo $fmt?></option>
-<?php
-                $selected = '';
+                <option value="<?php echo $fmt?>" <?php if ($fmt == $dateFormat) echo 'selected="selected"' ?>><?php echo $fmt?></option>
+                <?php
             }
             ?>
-          </select>
-		</div>
-<?php } ?>
+            </select>
+        </div>
+            <?php
+        }
+        ?>
 
-      <div class="medium_label"><?php echo $GLOBALS['locImportDecimalSeparator']?></div>
-		<div class="field">
-			<input id="decimal_separator" name="decimal_separator" maxlength="1"
-				value="<?php echo htmlentities($GLOBALS['locDecimalSeparator'])?>"
-				onchange="settings_changed()"></input>
-		</div>
+        <div class="medium_label"><?php echo Translator::translate('ImportDecimalSeparator')?></div>
+        <div class="field">
+            <input id="decimal_separator" name="decimal_separator" maxlength="1"
+                value="<?php echo htmlentities($decimalSeparator)?>"
+                onchange="settings_changed()">
+        </div>
 
-		<div class="medium_label"><?php echo $GLOBALS['locImportSkipRows']?></div>
-		<div class="field">
-			<input id="skip_rows" name="skip_rows"
-				onchange="settings_changed(); update_mapping_table()" value="0"></input>
-		</div>
+        <div class="medium_label"><?php echo Translator::translate('ImportSkipRows')?></div>
+        <div class="field">
+            <input id="skip_rows" name="skip_rows" onchange="settings_changed(); update_mapping_table()" value="0">
+        </div>
 
-<?php if ($this->duplicateControl) { ?>
-      <div class="medium_label"><?php echo $GLOBALS['locImportExistingRowHandling']?></div>
-		<div class="field">
-			<select id="duplicate_processing" name="duplicate_processing"
-				onchange="settings_changed()">
-				<option value="ignore" selected="selected"><?php echo $GLOBALS['locImportExistingRowIgnore']?></option>
-				<option value="update"><?php echo $GLOBALS['locImportExistingRowUpdate']?></option>
-			</select>
-		</div>
+        <?php if ($this->duplicateControl) { ?>
+      <div class="medium_label"><?php echo Translator::translate('ImportExistingRowHandling')?></div>
+        <div class="field">
+            <select id="duplicate_processing" name="duplicate_processing"
+                onchange="settings_changed()">
+                <option value="ignore" selected="selected"><?php echo Translator::translate('ImportExistingRowIgnore')?></option>
+                <option value="update"><?php echo Translator::translate('ImportExistingRowUpdate')?></option>
+            </select>
+        </div>
 
-		<div class="medium_label"><?php echo $GLOBALS['locImportIdentificationColumns']?></div>
-		<div id="columns" class="field"></div>
-<?php } ?>
+        <div class="medium_label"><?php echo Translator::translate('ImportIdentificationColumns')?></div>
+        <div id="columns" class="field"></div>
+        <?php } ?>
 
-<?php $this->add_custom_form_fields(); ?>
+        <?php $this->addCustomFormFields(); ?>
 
-      <div class="unlimited_label"><?php echo $GLOBALS['locImportColumnMapping']?></div>
-		<div class="column_mapping">
-			<div id="mapping_errors"></div>
-			<table id="column_table">
-			</table>
-		</div>
+        <div class="unlimited_label"><?php echo Translator::translate('ImportColumnMapping')?></div>
+        <div class="column_mapping">
+            <div id="mapping_errors"></div>
+            <table id="column_table">
+            </table>
+        </div>
 
-		<div class="form_buttons" style="clear: both">
-			<button name="import" type="submit" value="preview"><?php echo $GLOBALS['locImportButtonPreview']?></button>
-			<button name="import" type="submit" value="import"><?php echo $GLOBALS['locImportButtonImport']?></button>
-		</div>
-	</form>
+        <div class="form_buttons">
+            <button name="import" type="submit" value="preview"><?php echo Translator::translate('ImportButtonPreview')?></button>
+            <button name="import" type="submit" value="import"><?php echo Translator::translate('ImportButtonImport')?></button>
+        </div>
+    </form>
 </div>
-<?php
+        <?php
     }
 
-    protected function get_csv($handle, $delimiter, $enclosure, $charset,
-        $line_ending)
+    /**
+     * Get a line from file with the given charset and line ending
+     *
+     * @param resource $handle     File handle
+     * @param string   $charset    Character set
+     * @param string   $lineEnding Line ending
+     *
+     * @return string
+     */
+    protected function fgetsCharset($handle, $charset, $lineEnding = "\n")
     {
+        if (strncmp($charset, 'UTF-16', 6) == 0) {
+            $be = $charset == 'UTF-16' || $charset == 'UTF-16BE';
+            $str = '';
+            $le_pos = 0;
+            $le_len = strlen($lineEnding);
+            while (!feof($handle)) {
+                $c1 = fgetc($handle);
+                $c2 = fgetc($handle);
+                if ($c1 === false || $c2 === false) {
+                    break;
+                }
+                $str .= $c1 . $c2;
+                if (($be && ord($c1) == 0 && $c2 == $lineEnding[$le_pos])
+                    || (!$be && ord($c2) == 0 && $c1 == $lineEnding[$le_pos])
+                ) {
+                    if (++$le_pos >= $le_len) {
+                        break;
+                    }
+                } else {
+                    $le_pos = 0;
+                }
+            }
+            $str = iconv($charset, _CHARSET_, $str);
+        } else {
+            $str = '';
+            $le_pos = 0;
+            $le_len = strlen($lineEnding);
+            while (!feof($handle)) {
+                $c1 = fgetc($handle);
+                if ($c1 === false) {
+                    break;
+                }
+                $str .= $c1;
+                if ($c1 == $lineEnding[$le_pos]) {
+                    if (++$le_pos >= $le_len) {
+                        break;
+                    }
+                } else {
+                    $le_pos = 0;
+                }
+            }
+            $conv_str = iconv($charset, _CHARSET_, $str);
+            if ($str && !$conv_str) {
+                error_log(
+                    "Conversion from '$charset' to '" . _CHARSET_
+                    . "' failed for string '$str'"
+                );
+            } else {
+                $str = $conv_str;
+            }
+        }
+        return $str;
+    }
+
+    /**
+     * Get CSV data from a file
+     *
+     * @param resource $handle     File handle
+     * @param string   $delimiter  Field delimiter
+     * @param string   $enclosure  Enclosure character
+     * @param string   $charset    Character set
+     * @param string   $lineEnding Line ending style
+     *
+     * @return array
+     */
+    protected function getCsv($handle, $delimiter, $enclosure, $charset, $lineEnding
+    ) {
         $line = '';
         do {
-            $str = fgets_charset($handle, $charset, $line_ending);
+            $str = $this->fgetsCharset($handle, $charset, $lineEnding);
             $line .= $str;
-            // We must be at EOF or have balanced number of enclosure characters to have a completed string
-        } while ($str !== '' && $enclosure !== '' &&
-             substr_count($line, $enclosure) % 2 !== 0);
+            // We must be at EOF or have balanced number of enclosure characters to
+            // have a completed string
+        } while ($str !== '' && $enclosure !== ''
+             && substr_count($line, $enclosure) % 2 !== 0
+        );
+        if ('' === $line) {
+            return [];
+        }
+
+        // Polyfill for str_getcsv
+        if (!function_exists('str_getcsv')) {
+            $strGetCsv = function ($input, $delimiter = ',', $enclosure = '"') {
+                $temp = fopen('php://memory', 'rw');
+                fwrite($temp, $input);
+                fseek($temp, 0);
+                $r = fgetcsv($temp, 4096, $delimiter, $enclosure);
+                fclose($temp);
+                return $r;
+            };
+            return $strGetCsv($line, $delimiter, $enclosure);
+        }
         return str_getcsv($line, $delimiter, $enclosure);
     }
 
-    protected function process_import_row($table, $row, $dupMode, $dupCheckColumns,
-        $mode, &$addedRecordId)
-    {
+    /**
+     * Process a row to import
+     *
+     * @param string $table            Table name
+     * @param array  $row              Row data
+     * @param string $dupMode          Duplicate handling mode ('ignore' or 'update')
+     * @param array  $dupCheckColumns  Columns to use for duplicate check
+     * @param string $mode             Mode ('preview' or 'import')
+     * @param string $decimalSeparator Decimal separator
+     * @param array  $fieldDefs        Field definitions
+     * @param int    $addedRecordId    ID of the added record
+     *
+     * @return string Result message
+     */
+    protected function processImportRow($table, $row, $dupMode, $dupCheckColumns,
+        $mode, $decimalSeparator, $fieldDefs, &$addedRecordId
+    ) {
         global $dblink;
 
-        $sep = getRequest('decimal_separator', ',');
-        if ($sep != '.') {
-            $fieldDefs = getFormElements($table);
-            foreach ($row as $key => &$value) {
-                foreach ($fieldDefs as $fieldDef) {
-                    if ($fieldDef['name'] === $key) {
-                        if ($fieldDef['type'] == 'INT'
-                            && in_array($fieldDef['style'], ['percent', 'currency'])
-                        ) {
-                            $value = str_replace($sep, '.', $value);
-                        }
-                        break;
-                    }
+        if ('custom_price_map' === $table && !isset($row['custom_price_id'])
+            && isset($row['company_id'])
+        ) {
+            static $customPrice = null;
+            if (!$customPrice || $customPrice['company_id'] != $row['company_id']) {
+                $customPrice = getCustomPriceSettings($row['company_id']);
+                if (!$customPrice) {
+                    $customPrice = setCustomPriceSettings(
+                        $row['company_id'],
+                        0,
+                        1,
+                        null
+                    );
+                    $customPrice = getCustomPriceSettings($row['company_id']);
+                }
+            }
+            if ($customPrice) {
+                $row['custom_price_id'] = $customPrice['id'];
+            }
+            unset($row['company_id']);
+        }
+
+        foreach ($row as $key => &$value) {
+            if (isset($fieldDefs[$key])) {
+                $fieldDef = $fieldDefs[$key];
+                list($type) = explode('(', $fieldDef['Type'], 2);
+                if ($decimalSeparator != '.'
+                    && in_array($type, ['decimal', 'numeric', 'float', 'double'])
+                ) {
+                    $value = str_replace($decimalSeparator, '.', $value);
+                }
+                if ('' === $value
+                    && in_array(
+                        $type, ['int', 'decimal', 'numeric', 'float', 'double']
+                    )
+                ) {
+                    $value = null;
                 }
             }
         }
+        unset($value);
 
         $result = '';
         $recordId = null;
-        if ($dupMode != '' && count($dupCheckColumns) > 0) {
+        if ('' != $dupMode && $dupCheckColumns) {
             $query = "select id from {prefix}$table where Deleted=0";
             $where = '';
             $params = [];
             foreach ($dupCheckColumns as $dupCol) {
+                if (!isset($row[$dupCol])) {
+                    continue;
+                }
                 $where .= " AND $dupCol=?";
                 $params[] = $row[$dupCol];
             }
-            $res = mysqli_param_query($query . $where, $params);
-            if ($dupRow = mysqli_fetch_row($res)) {
-                $id = $dupRow[0];
-                $found_dup = true;
-                if ($dupMode == 'update')
-                    $result = "Update existing row id $id in table $table";
-                else
-                    $result = "Not updating existing row id $id in table $table";
-
-                if ($mode == 'import' && $dupMode == 'update') {
-                    // Update existing row
-                    $query = "UPDATE {prefix}$table SET ";
-                    $columns = '';
-                    $params = [];
-                    foreach ($row as $key => $value) {
-                        if ($key == 'id')
-                            continue;
-                        if ($columns)
-                            $columns .= ', ';
-                        $columns .= "$key=?";
-                        $params[] = $value;
+            if ($params) {
+                $dupRows = dbParamQuery($query . $where, $params);
+                if ($dupRows) {
+                    $id = $dupRows[0]['id'];
+                    $found_dup = true;
+                    if ($dupMode == 'update') {
+                        $result = "Update existing row id $id in table $table";
+                    } else {
+                        $result = "Not updating existing row id $id in table $table";
                     }
-                    $query .= "$columns WHERE id=?";
-                    $params[] = $id;
-                    mysqli_param_query($query, $params);
+
+                    if ($mode == 'import' && $dupMode == 'update') {
+                        // Update existing row
+                        $query = "UPDATE {prefix}$table SET ";
+                        $columns = [];
+                        $params = [];
+                        foreach ($row as $key => $value) {
+                            if ('id' === $key || 'tags' === $key) {
+                                continue;
+                            }
+                            $columns[] = "$key=?";
+                            $params[] = $value;
+                        }
+                        $query .= implode(',', $columns) . ' WHERE id=?';
+                        $params[] = $id;
+                        dbParamQuery($query, $params);
+                        if (in_array($table, ['company', 'company_contact'])
+                            && isset($row['tags'])
+                        ) {
+                            $type = $table === 'company' ? 'company' : 'contact';
+                            saveTags($type, $id, $row['tags']);
+                        }
+                    }
+                    return $result;
                 }
-                return $result;
             }
         }
         // Add new row
         $query = "INSERT INTO {prefix}$table ";
-        $columns = '';
-        $values = '';
+        $columns = [];
+        $values = [];
         $params = [];
         foreach ($row as $key => $value) {
-            if ($key == 'id')
+            if ('id' === $key || 'tags' === $key) {
                 continue;
-            if ($columns)
-                $columns .= ', ';
-            if ($values)
-                $values .= ', ';
-            $columns .= $key;
-            $values .= '?';
+            }
+            $columns[] = $key;
+            $values[] = '?';
             $params[] = $value;
         }
-        $query .= "($columns) VALUES ($values)";
+        $query .= '(' . implode(',', $columns) . ') VALUES (' . implode(',', $values)
+            . ')';
         if ($mode == 'import') {
-            mysqli_param_query($query, $params);
+            dbParamQuery($query, $params);
             $addedRecordId = mysqli_insert_id($dblink);
-        } else
+            if (in_array($table, ['company', 'company_contact'])
+                && !empty($row['tags'])
+            ) {
+                $type = $table === 'company' ? 'company' : 'contact';
+                saveTags($type, $addedRecordId, $row['tags']);
+            }
+        } else {
             $addedRecordId = 'x';
+        }
         $result = "Add as new (ID $addedRecordId) into table $table";
         return $result;
     }
 
-    protected function process_child_records($parentTable, $parentId, $childRecords,
-        $duplicateMode, $importMode, &$field_defs)
-    {
+    /**
+     * Import child records
+     *
+     * @param string $parentTable      Table name
+     * @param int    $parentId         Parent record ID
+     * @param array  $childRecords     Child records to import
+     * @param string $duplicateMode    Duplicate handling mode ('ignore' or 'update')
+     * @param string $importMode       Mode ('preview' or 'import')
+     * @param string $decimalSeparator Decimal separator
+     * @param array  $fieldDefs        Field definitions
+     *
+     * @return void
+     */
+    protected function processChildRecords($parentTable, $parentId, $childRecords,
+        $duplicateMode, $importMode, $decimalSeparator, &$fieldDefs
+    ) {
         switch ($parentTable) {
         case 'invoice' :
             $childTable = 'invoice_row';
@@ -992,109 +1377,334 @@ function select_preset()
             ++$childNum;
             $childColumns["${parentTable}_id"] = $parentId;
 
-            if (!isset($field_defs[$childTable])) {
-                $field_defs[$childTable] = $this->get_field_defs($childTable);
+            if (!isset($fieldDefs[$childTable])) {
+                $fieldDefs[$childTable] = $this->getFieldDefs($childTable);
             }
 
             foreach ($childColumns as $column => $value) {
-                if (!isset($field_defs[$childTable][$column]))
+                if (!isset($fieldDefs[$childTable][$column])) {
                     die(
                         "Invalid column name: $childTable." .
-                             htmlspecialchars($column));
+                        htmlspecialchars($column)
+                    );
+                }
             }
             $childDupColumns = [];
             $addedChildRecordId = null;
-            $result = $this->process_import_row($childTable, $childColumns,
-                $duplicateMode, $childDupColumns, $importMode, $addedChildrecordId);
+            $result = $this->processImportRow(
+                $childTable, $childColumns, $duplicateMode, $childDupColumns,
+                $importMode, $decimalSeparator, $fieldDefs[$childTable],
+                $addedChildrecordId
+            );
             echo "    &nbsp; Child Record $childNum: $result<br>\n";
         }
     }
 
-    protected function import_file($importMode)
+    /**
+     * Import a file
+     *
+     * @param string $importMode Mode ('preview' or 'import')
+     *
+     * @return void
+     */
+    protected function importFile($importMode)
     {
-        $charset = getRequest('charset', 'UTF-8');
-        $table = getRequest('table', '');
-        $format = getRequest('format', '');
-        $fieldDelimiter = getRequest('field_delim', 'comma');
-        $enclosureChar = getRequest('enclosure_char', 'doublequote');
-        $rowDelimiter = getRequest('row_delim', 'lf');
-        $duplicateMode = getRequest('duplicate_processing', '');
-        $duplicateCheckColumns = getRequest('column', []);
-        $columnMappings = getRequest('map_column', []);
-        $skipRows = getRequest('skip_rows', 0);
+        // Try to disable maximum execution time
+        set_time_limit(0);
 
-        if (!$charset || !$format || !$fieldDelimiter || !$enclosureChar ||
-             !$rowDelimiter) {
+        // Disable output buffering
+        ob_end_flush();
+
+        $charset = getPostOrQuery('charset', 'UTF-8');
+        $table = getPostOrQuery('table', '');
+        $format = getPostOrQuery('format', '');
+        $fieldDelimiter = getPostOrQuery('field_delim', 'comma');
+        $enclosureChar = getPostOrQuery('enclosure_char', 'doublequote');
+        $rowDelimiter = getPostOrQuery('row_delim', 'lf');
+        $duplicateMode = getPostOrQuery('duplicate_processing', '');
+        $duplicateCheckColumns = getPostOrQuery('column', []);
+        $columnMappings = getPostOrQuery('map_column', []);
+        $skipRows = getPostOrQuery('skip_rows', 0);
+        $decimalSeparator = getPostOrQuery('decimal_separator', ',');
+
+        if (!$charset || !$format || !$fieldDelimiter || !$enclosureChar
+            || !$rowDelimiter
+        ) {
             die('Invalid parameters');
         }
 
-        if (!$this->table_valid($table))
+        if (!$this->isTableNameValid($table)) {
             die('Invalid table name: ' . htmlspecialchars($table));
+        }
 
         ?>
 <div class="form_container">
-	<h1><?php echo $GLOBALS['locImportResults']?></h1>
-<?php
+    <h1><?php echo Translator::translate('ImportResults')?></h1>
+        <?php
+
         if ($importMode != 'import') {
-            echo '<p>' . $GLOBALS['locImportSimulation'] . "</p>\n";
+            echo '<p>' . Translator::translate('ImportSimulation') . "</p>\n";
         }
 
-        $field_defs[$table] = $this->get_field_defs($table);
+        $fieldDefs[$table] = $this->getFieldDefs($table);
+        // Add type_id for company so that it's handled properly even though it's not
+        // currently used.
+        if ($table == 'company') {
+            $fieldDefs[] = [
+                'name' => 'type_id',
+                'type' => 'INT',
+                'style' => 'short'
+            ];
+        }
 
         foreach ($duplicateCheckColumns as $key => $column) {
-            if (!$column)
+            if (empty($column)) {
                 unset($duplicateCheckColumns[$key]);
-            elseif (!isset($field_defs[$table][$column]))
+            } elseif (!isset($fieldDefs[$table][$column])) {
                 die(
-                    'Invalid duplicate check column name: ' .
-                         htmlspecialchars($column));
+                    'Invalid duplicate check column name: '
+                    . htmlspecialchars($column)
+                );
+            }
+        }
+
+        if ($this->requireDuplicateCheck && empty($duplicateCheckColumns)) {
+            die('At least one duplicate check column is required');
         }
 
         if ($format == 'csv') {
             $fp = fopen($_SESSION['import_file'], 'r');
-            if (!$fp)
+            if (!$fp) {
                 die('Could not open import file for reading');
-
-            foreach ($columnMappings as $key => $column) {
-                if ($column && !isset($field_defs[$table][$column]))
-                    die('Invalid column name: ' . htmlspecialchars($column));
             }
 
-            $field_delims = $this->get_field_delims();
-            $enclosure_chars = $this->get_enclosure_chars();
-            $row_delims = $this->get_row_delims();
+            foreach ($columnMappings as $key => $column) {
+                if ($column && !isset($fieldDefs[$table][$column])) {
+                    die('Invalid column name: ' . htmlspecialchars($column));
+                }
+            }
 
-            if (!isset($field_delims[$fieldDelimiter]))
+            $field_delims = $this->getFieldDelims();
+            $enclosure_chars = $this->getEnclosureChars();
+            $row_delims = $this->getRowDelims();
+
+            if (!isset($field_delims[$fieldDelimiter])) {
                 die('Invalid field delimiter');
+            }
             $fieldDelimiter = $field_delims[$fieldDelimiter]['char'];
-            if (!isset($enclosure_chars[$enclosureChar]))
+            if (!isset($enclosure_chars[$enclosureChar])) {
                 die('Invalid enclosure character');
+            }
             $enclosureChar = $enclosure_chars[$enclosureChar]['char'];
-            if (!isset($row_delims[$rowDelimiter]))
+            if (!isset($row_delims[$rowDelimiter])) {
                 die('Invalid field delimiter');
+            }
             $rowDelimiter = $row_delims[$rowDelimiter]['char'];
 
             // Force enclosure char, otherwise fgetcsv would balk.
-            if ($enclosureChar == '')
+            if ($enclosureChar == '') {
                 $enclosureChar = "\x01";
+            }
 
             $rowNum = 1;
             for ($i = 0; $i < $skipRows; $i ++) {
-                $this->get_csv($fp, $fieldDelimiter, $enclosureChar, $charset,
-                    $rowDelimiter);
+                $this->getCsv(
+                    $fp, $fieldDelimiter, $enclosureChar, $charset, $rowDelimiter
+                );
                 ++$rowNum;
             }
 
             $errors = [];
-            $headings = $this->get_csv($fp, $fieldDelimiter, $enclosureChar,
-                $charset, $rowDelimiter);
+            $headings = $this->getCsv(
+                $fp, $fieldDelimiter, $enclosureChar, $charset, $rowDelimiter
+            );
+            if ('import' === $importMode) {
+                dbQueryCheck('BEGIN');
+            }
             while (!feof($fp)) {
-                $row = $this->get_csv($fp, $fieldDelimiter, $enclosureChar, $charset,
-                    $rowDelimiter);
-                if (!isset($row))
+                $row = $this->getCsv(
+                    $fp, $fieldDelimiter, $enclosureChar, $charset, $rowDelimiter
+                );
+                if (empty($row)) {
                     break;
+                }
 
                 ++$rowNum;
+                if ('import' === $importMode && $rowNum % 5000 == 0) {
+                    dbQueryCheck('COMMIT');
+                    dbQueryCheck('BEGIN');
+                }
+                $mapped_row = [];
+                $haveMappings = false;
+                for ($i = 0; $i < count($row); $i++) {
+                    if ($columnMappings[$i]) {
+                        $haveMappings = true;
+                        $mapped_row[$columnMappings[$i]] = $row[$i];
+                    }
+                }
+                if (!$haveMappings) {
+                    if (!$this->ignoreEmptyRows) {
+                        echo "    Row $rowNum: " .
+                             Translator::translate('ImportNoMappedColumns') . "<br>\n";
+                    }
+                } else {
+                    $addedRecordId = null;
+                    $result = $this->processImportRow(
+                        $table, $mapped_row, $duplicateMode, $duplicateCheckColumns,
+                        $importMode, $decimalSeparator, $fieldDefs[$table],
+                        $addedRecordId
+                    );
+                    if ($result) {
+                        echo Translator::translate('ImportRow') . " $rowNum: " .
+                             htmlspecialchars($result) . "<br>\n";
+                    }
+                }
+            }
+            if ('import' === $importMode) {
+                dbQueryCheck('COMMIT');
+            }
+            fclose($fp);
+            if ($_SESSION['import_file'] != _IMPORT_FILE_
+                && $importMode == 'import'
+            ) {
+                unlink($_SESSION['import_file']);
+            }
+        } elseif ($format == 'xml') {
+            $data = file_get_contents($_SESSION['import_file']);
+            if ($charset != _CHARSET_) {
+                $data = iconv($charset, _CHARSET_, $data);
+            }
+
+            try {
+                $xml = new SimpleXMLElement($data);
+            } catch (Exception $e) {
+                die('XML parsing failed: ' . htmlspecialchars($e->getMessage()));
+            }
+            $this->importXml(
+                $xml, $table, $fieldDefs, $columnMappings, $duplicateMode,
+                $duplicateCheckColumns, $importMode, $decimalSeparator, $errors
+            );
+        } elseif ($format == 'json') {
+            $data = file_get_contents($_SESSION['import_file']);
+            if ($data === false) {
+                echo json_encode(
+                    [
+                        'errors' => [
+                            'Could not open import file for reading'
+                        ]
+                    ]
+                );
+                error_log(
+                    "Could not open import file '" + $_SESSION['import_file']
+                         + "' for reading"
+                );
+                exit();
+            }
+
+            if ($charset != _CHARSET_) {
+                $data = iconv($charset, _CHARSET_, $data);
+            }
+
+            $data = json_decode($data, true);
+            if ($data === null) {
+                echo json_encode(
+                    [
+                        'errors' => [
+                            'Could not decode JSON'
+                        ]
+                    ]
+                );
+                error_log('JSON parsing failed');
+                exit();
+            }
+            $recNum = 0;
+            $headings = [];
+            $rows = [];
+
+            if ('import' === $importMode) {
+                dbQueryCheck('BEGIN');
+            }
+            foreach (reset($data) as $record) {
+                $childRecords = [];
+                $mapped_row = [];
+                foreach ($record as $column => $value) {
+                    if (is_array($value)) {
+                        foreach ($value as $subRecord) {
+                            $childRecords[] = $subRecord;
+                        }
+                    } elseif (is_object($value)) {
+                        $childRecords[] = get_object_vars($value);
+                    } else {
+                        if (!isset($fieldDefs[$table][$column])) {
+                            die(
+                                "Invalid column name: $table." .
+                                     htmlspecialchars($column)
+                            );
+                        }
+                        $mapped_row[$column] = $value;
+                    }
+                }
+
+                ++$recNum;
+                if ('import' === $importMode && $recNum % 5000 == 0) {
+                    dbQueryCheck('COMMIT');
+                    dbQueryCheck('BEGIN');
+                }
+
+                $addedRecordId = null;
+                $result = $this->processImportRow(
+                    $table, $mapped_row, $duplicateMode, $duplicateCheckColumns,
+                    $importMode, $decimalSeparator, $fieldDefs[$table],
+                    $addedRecordId
+                );
+                if ($result) {
+                    echo "    Record $recNum: $result<br>\n";
+                }
+                // Updating not feasible || $duplicateMode == 'update')
+                if (isset($addedRecordId)) {
+                    $this->processChildRecords(
+                        $table, $addedRecordId, $childRecords, $duplicateMode,
+                        $importMode, $decimalSeparator, $fieldDefs
+                    );
+                }
+            }
+            if ('import' === $importMode) {
+                dbQueryCheck('COMMIT');
+            }
+        } elseif ($format == 'fixed') {
+            $data = file_get_contents($_SESSION['import_file']);
+
+            if ($charset != _CHARSET_) {
+                $data = iconv($charset, _CHARSET_, $data);
+            }
+
+            $rowNum = 0;
+
+            if ('import' === $importMode) {
+                dbQueryCheck('BEGIN');
+            }
+            foreach (explode("\n", $data) as $line) {
+                $line = trim($line, "\r");
+                $pos = 0;
+                $row = [];
+                foreach ($this->fixedWidthSettings as $column) {
+                    $value = substr($line, $pos, $column['len']);
+                    if (!empty($column['filter'])
+                        && !in_array($value, $column['filter'])
+                    ) {
+                        // Ignore line
+                        continue 2;
+                    }
+                    $row[] = $value;
+                    $pos += $column['len'];
+                }
+
+                ++$rowNum;
+                if ('import' === $importMode && $rowNum % 5000 == 0) {
+                    dbQueryCheck('COMMIT');
+                    dbQueryCheck('BEGIN');
+                }
+
                 $mapped_row = [];
                 $haveMappings = false;
                 for ($i = 0; $i < count($row); $i ++) {
@@ -1106,147 +1716,160 @@ function select_preset()
                 if (!$haveMappings) {
                     if (!$this->ignoreEmptyRows) {
                         echo "    Row $rowNum: " .
-                             $GLOBALS['locImportNoMappedColumns'] . "<br>\n";
+                             Translator::translate('ImportNoMappedColumns') . "<br>\n";
                     }
                 } else {
                     $addedRecordId = null;
-                    $result = $this->process_import_row($table, $mapped_row,
-                        $duplicateMode, $duplicateCheckColumns, $importMode,
-                        $addedRecordId);
+                    $result = $this->processImportRow(
+                        $table, $mapped_row, $duplicateMode, $duplicateCheckColumns,
+                        $importMode, $decimalSeparator, $fieldDefs[$table],
+                        $addedRecordId
+                    );
                     if ($result) {
-                        echo $GLOBALS['locImportRow'] . " $rowNum: " .
+                        echo Translator::translate('ImportRow') . " $rowNum: " .
                              htmlspecialchars($result) . "<br>\n";
                     }
                 }
-                ob_flush();
             }
-            fclose($fp);
-            if ($_SESSION['import_file'] != _IMPORT_FILE_ && $importMode == 'import')
-                unlink($_SESSION['import_file']);
-        } elseif ($format == 'xml') {
-            $data = file_get_contents($_SESSION['import_file']);
-            if ($charset != _CHARSET_)
-                $data = iconv($charset, _CHARSET_, $data);
-
-            try {
-                $xml = new SimpleXMLElement($data);
-            } catch (Exception $e) {
-                die('XML parsing failed: ' . htmlspecialchars($e->getMessage()));
-            }
-            $errors = [];
-            $recNum = 0;
-            foreach ($xml as $record) {
-                $record = get_object_vars($record);
-
-                $childRecords = [];
-                $mapped_row = [];
-                foreach ($record as $column => $value) {
-                    if (is_array($value)) {
-                        foreach ($value as $subRecord) {
-                            $childRecords[] = get_object_vars($subRecord);
-                        }
-                    } elseif (is_object($value))
-                        $childRecords[] = get_object_vars($value);
-                    else {
-                        if (!isset($field_defs[$table][$column]))
-                            die(
-                                "Invalid column name: $table." .
-                                     htmlspecialchars($column));
-                        $mapped_row[$column] = $value;
-                    }
-                }
-
-                ++$recNum;
-                $addedRecordId = null;
-                $result = $this->process_import_row($table, $mapped_row,
-                    $duplicateMode, $duplicateCheckColumns, $importMode,
-                    $addedRecordId);
-                if ($result) {
-                    echo "    Record $recNum: $result<br>\n";
-                }
-                if (isset($addedRecordId)) // Updating not feasible || $duplicateMode == 'update')
-{
-                    $this->process_child_records($table, $addedRecordId,
-                        $childRecords, $duplicateMode, $importMode, $field_defs);
-                }
-                ob_flush();
-            }
-        } elseif ($format == 'json') {
-            $data = file_get_contents($_SESSION['import_file']);
-            if ($data === false) {
-                echo json_encode(
-                    [
-                        'errors' => [
-                            'Could not open import file for reading'
-                        ]
-                    ]);
-                error_log(
-                    "Could not open import file '" + $_SESSION['import_file'] +
-                         "' for reading");
-                exit();
-            }
-
-            if ($charset != _CHARSET_)
-                $data = iconv($charset, _CHARSET_, $data);
-
-            $data = json_decode($data, true);
-            if ($data === null) {
-                echo json_encode(
-                    [
-                        'errors' => [
-                            'Could not decode JSON'
-                        ]
-                    ]);
-                error_log('JSON parsing failed');
-                exit();
-            }
-            $recNum = 0;
-            $headings = [];
-            $rows = [];
-
-            foreach (reset($data) as $record) {
-                $childRecords = [];
-                $mapped_row = [];
-                foreach ($record as $column => $value) {
-                    if (is_array($value)) {
-                        foreach ($value as $subRecord) {
-                            $childRecords[] = $subRecord;
-                        }
-                    } elseif (is_object($value))
-                        $childRecords[] = get_object_vars($value);
-                    else {
-                        if (!isset($field_defs[$table][$column]))
-                            die(
-                                "Invalid column name: $table." .
-                                     htmlspecialchars($column));
-                        $mapped_row[$column] = $value;
-                    }
-                }
-
-                ++$recNum;
-                $addedRecordId = null;
-                $result = $this->process_import_row($table, $mapped_row,
-                    $duplicateMode, $duplicateCheckColumns, $importMode,
-                    $addedRecordId);
-                if ($result) {
-                    echo "    Record $recNum: $result<br>\n";
-                }
-                if (isset($addedRecordId)) // Updating not feasible || $duplicateMode == 'update')
-{
-                    process_child_records($table, $addedRecordId, $childRecords,
-                        $duplicateMode, $importMode, $field_defs);
-                }
-                ob_flush();
+            if ('import' === $importMode) {
+                dbQueryCheck('COMMIT');
             }
         }
-        echo '    ' . $GLOBALS['locImportDone'] . "\n";
+
+        if ('import' === $importMode) {
+            echo '    ' . Translator::translate('ImportDone') . "\n";
+        } else {
+            echo '    ' . Translator::translate('ImportSimulationDone') . "\n";
+        }
         ?>
     </div>
-<?php
+        <?php
     }
 
-    protected function table_valid($table)
+    /**
+     * Import XML
+     *
+     * @param SimpleXMLElement $xml                   XML
+     * @param string           $table                 Table name
+     * @param array            $fieldDefs             Field definitions
+     * @param array            $columnMappings        Column mappings
+     * @param string           $duplicateMode         Duplicate handling mode
+     *                                                ('ignore' or 'update')
+     * @param array            $duplicateCheckColumns Columns to use for duplicate
+     *                                                check
+     * @param string           $importMode            Mode ('preview' or 'import')
+     * @param string           $decimalSeparator      Decimal separator
+     * @param array            $errors                Any errors
+     *
+     * @return void
+     */
+    protected function importXml($xml, $table, $fieldDefs, $columnMappings,
+        $duplicateMode, $duplicateCheckColumns, $importMode, $decimalSeparator,
+        &$errors
+    ) {
+        $errors = [];
+        $recNum = 0;
+        if ('import' === $importMode) {
+            dbQueryCheck('BEGIN');
+        }
+        foreach ($xml as $record) {
+            $record = get_object_vars($record);
+
+            $childRecords = [];
+            $mapped_row = [];
+            foreach ($record as $column => $value) {
+                if (count($value) > 1) {
+                    foreach ($value as $subRecord) {
+                        $childRecords[] = get_object_vars($subRecord);
+                    }
+                } else {
+                    if (!isset($fieldDefs[$table][$column])) {
+                        die(
+                            "Invalid column name: $table."
+                            . htmlspecialchars($column)
+                        );
+                    }
+                    $mapped_row[$column] = (string)$value;
+                }
+            }
+
+            ++$recNum;
+            if ('import' === $importMode && $recNum % 5000 == 0) {
+                dbQueryCheck('COMMIT');
+                dbQueryCheck('BEGIN');
+            }
+            $addedRecordId = null;
+            $result = $this->processImportRow(
+                $table, $mapped_row, $duplicateMode, $duplicateCheckColumns,
+                $importMode, $decimalSeparator, $fieldDefs[$table], $addedRecordId
+            );
+            if ($result) {
+                echo "    Record $recNum: $result<br>\n";
+            }
+            // Updating not feasible || $duplicateMode == 'update')
+            if (isset($addedRecordId)) {
+                $this->processChildRecords(
+                    $table, $addedRecordId, $childRecords, $duplicateMode,
+                    $importMode, $decimalSeparator, $fieldDefs
+                );
+            }
+        }
+        if ('import' === $importMode) {
+            dbQueryCheck('COMMIT');
+        }
+    }
+
+    /**
+     * Check if the table name is valid
+     *
+     * @param string $table Table name
+     *
+     * @return bool
+     */
+    protected function isTableNameValid($table)
     {
-        return table_valid($table);
+        return tableNameValid($table);
+    }
+
+    /**
+     * Return the count of field delimiters in the given data piece
+     *
+     * @param string $data Data
+     *
+     * @return int
+     */
+    protected function getDelimiterCount($data)
+    {
+        $count = 0;
+        foreach ($this->getFieldDelims() as $key => $value) {
+            $count += substr_count($data, $value['char']);
+        }
+        return $count;
+    }
+
+    /**
+     * Try to convert a string using iconv
+     *
+     * @param string $from From charset
+     * @param string $to   To charset
+     * @param string $str  String to convert
+     *
+     * @return string
+     */
+    protected function tryIconv($from, $to, $str)
+    {
+        set_error_handler(
+            function ($errno, $errstr, $errfile, $errline) {
+                throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
+            }
+        );
+        try {
+            $str = iconv($from, $to, $str);
+        } catch (ErrorException $e) {
+            restore_error_handler();
+            return false;
+        }
+        restore_error_handler();
+        return $str;
     }
 }

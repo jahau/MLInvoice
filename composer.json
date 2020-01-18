@@ -1,0 +1,36 @@
+{
+    "name": "emaijala/mlinvoice",
+    "description": "Free web-based invoicing primarily for Finnish companies",
+    "authors": [
+        {
+            "name": "Ere Maijala",
+            "email": "ere@labs.fi"
+        }
+    ],
+    "license": "GPL-2.0",
+    "config": {
+        "platform": {
+            "php": "5.6.0"
+        }
+    },
+    "require": {
+        "michelf/php-markdown": "^1.8",
+        "paragonie/random_compat": "^2.0",
+        "ramsey/uuid": "^3.7",
+        "setasign/fpdi": "^2.1",
+        "swiftmailer/swiftmailer": "^5.4",
+        "tecnickcom/tcpdf": "^6.2",
+        "guzzlehttp/guzzle": "^6.3",
+        "phpseclib/phpseclib": "^2.0"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^v2.10.3",
+        "phing/phing" : "^2.16.1",
+        "squizlabs/php_codesniffer": "^3.2.3"
+    },
+    "scripts": {
+        "post-install-cmd": [
+            "cp htaccess-vendor vendor/.htaccess"
+        ]
+    }
+}

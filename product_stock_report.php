@@ -1,177 +1,276 @@
 <?php
-/*******************************************************************************
- MLInvoice: web-based invoicing application.
- Copyright (C) 2010-2015 Ere Maijala
- 
- Portions based on:
- PkLasku : web-based invoicing software.
- Copyright (C) 2004-2008 Samu Reinikainen
- 
- This program is free software. See attached LICENSE.
- 
- *******************************************************************************/
-
-/*******************************************************************************
- MLInvoice: web-pohjainen laskutusohjelma.
- Copyright (C) 2010-2015 Ere Maijala
- 
- Perustuu osittain sovellukseen:
- PkLasku : web-pohjainen laskutusohjelmisto.
- Copyright (C) 2004-2008 Samu Reinikainen
- 
- Tämä ohjelma on vapaa. Lue oheinen LICENSE.
- 
- *******************************************************************************/
+/**
+ * Product stock report
+ *
+ * PHP version 5
+ *
+ * Copyright (C) 2010-2019 Ere Maijala
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2,
+ * as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * @category MLInvoice
+ * @package  MLInvoice\Reports
+ * @author   Ere Maijala <ere@labs.fi>
+ * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
+ * @link     http://labs.fi/mlinvoice.eng.php
+ */
 require_once 'htmlfuncs.php';
 require_once 'sqlfuncs.php';
 require_once 'miscfuncs.php';
 require_once 'datefuncs.php';
-require_once 'localize.php';
+require_once 'translator.php';
 require_once 'pdf.php';
+require_once 'abstract_report.php';
 
-class ProductStockReport
+/**
+ * Product stock report
+ *
+ * @category MLInvoice
+ * @package  MLInvoice\Reports
+ * @author   Ere Maijala <ere@labs.fi>
+ * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
+ * @link     http://labs.fi/mlinvoice.eng.php
+ */
+class ProductStockReport extends AbstractReport
 {
-    protected $pdf = null;
-
+    /**
+     * Create the report form
+     *
+     * @return void
+     */
     public function createReport()
     {
-        $strReport = getRequest('report', '');
-        
+        $strReport = getPostOrQuery('report', '');
+
         if ($strReport) {
             $this->printReport();
             return;
         }
-        
-        $intProductId = getRequest('product', false);
+
+        $intProductId = getPostOrQuery('product', false);
         ?>
 
 <div class="form_container ui-widget-content ui-helper-clearfix">
-	<form method="get" id="params" name="params">
-		<input name="func" type="hidden" value="reports"> <input name="form"
-			type="hidden" value="product_stock"> <input name="report"
-			type="hidden" value="1">
+    <form method="get" id="params" name="params">
+        <input name="func" type="hidden" value="reports"> <input name="form"
+            type="hidden" value="product_stock"> <input name="report"
+            type="hidden" value="1">
 
-		<div class="unlimited_label">
-			<h1><?php echo $GLOBALS['locProductStockReport']?></h1>
-		</div>
+        <div class="unlimited_label">
+            <h1><?php echo Translator::translate('ProductStockReport')?></h1>
+        </div>
 
-		<div class="medium_label"><?php echo $GLOBALS['locProduct']?></div>
-		<div class="field"><?php echo htmlFormElement('product', 'LIST', $intProductId, 'medium', 'SELECT id, product_name FROM {prefix}product WHERE deleted=0 ORDER BY product_name', 'MODIFY', FALSE)?></div>
-		<div class="field_sep"></div>
-		<div class="medium_label"></div>
-		<div class="field">
-			<input type="checkbox" name="purchase_price" value="1"> <?php echo $GLOBALS['locOnlyProductsWithPurchasePrice']?></div>
+        <div class="medium_label"><?php echo Translator::translate('Product')?></div>
+        <div class="field">
+            <?php
+            echo htmlFormElement(
+                'product', 'LIST', $intProductId, 'medium',
+                'SELECT id, product_name FROM {prefix}product WHERE deleted=0'
+                    . ' ORDER BY product_name',
+                'MODIFY', false
+            );
+            ?>
+        </div>
+        <div class="field_sep"></div>
+        <div class="medium_label"></div>
+        <div class="field">
+            <label>
+                <input type="checkbox" id="purchase-price" name="purchase_price" value="1">
+                <?php echo Translator::translate('OnlyProductsWithPurchasePrice')?>
+            </label>
+        </div>
 
-		<div class="medium_label"><?php echo $GLOBALS['locPrintFormat']?></div>
-		<div class="field">
-			<input type="radio" name="format" value="html" checked="checked"><?php echo $GLOBALS['locPrintFormatHTML']?></input>
-		</div>
-		<div class="medium_label"></div>
-		<div class="field">
-			<input type="radio" name="format" value="pdf"><?php echo $GLOBALS['locPrintFormatPDF']?></input>
-		</div>
-		<div class="field_sep"></div>
+        <div class="medium_label"><?php echo Translator::translate('PrintFormat')?></div>
+        <div class="field">
+            <label>
+                <input type="radio" id="format-table" name="format" value="table" checked="checked">
+                <?php echo Translator::translate('PrintFormatTable')?>
+            </label>
+        </div>
+        <div class="medium_label"></div>
+        <div class="field">
+            <label>
+                <input type="radio" id="format-html" name="format" value="html">
+                <?php echo Translator::translate('PrintFormatHTML')?>
+            </label>
+        </div>
+        <div class="medium_label"></div>
+        <div class="field">
+            <label>
+                <input type="radio" id="format-pdf" name="format" value="pdf">
+                <?php echo Translator::translate('PrintFormatPDF')?>
+            </label>
+        </div>
+        <div class="field_sep"></div>
 
-		<div class="medium_label">
-			<a class="actionlink" href="#"
-				onclick="document.getElementById('params').submit(); return false;"><?php echo $GLOBALS['locCreateReport']?></a>
-		</div>
-	</form>
+        <div class="unlimited_label">
+            <a class="actionlink ui-button ui-corner-all ui-widget form-submit" href="#" data-form-target="">
+                <?php echo Translator::translate('CreateReport')?>
+            </a>
+            <a class="actionlink ui-button ui-corner-all ui-widget form-submit" href="#" data-form-target="_blank">
+                <?php echo Translator::translate('CreateReportInNewWindow')?>
+            </a>
+        </div>
+    </form>
 </div>
-<?php
+        <?php
     }
 
+    /**
+     * Print the report
+     *
+     * @return void
+     */
     protected function printReport()
     {
-        $intProductId = getRequest('product', FALSE);
-        $format = getRequest('format', 'html');
-        $purchasePrice = getRequest('purchase_price', false);
-        
+        $intProductId = getPostOrQuery('product', false);
+        $format = getPostOrQuery('format', 'html');
+        $purchasePrice = getPostOrQuery('purchase_price', false);
+
         $arrParams = [];
-        
+
         $strQuery = 'SELECT * ' . 'FROM {prefix}product ' . 'WHERE deleted=0';
-        
+
         if ($intProductId) {
             $strQuery .= ' AND id = ? ';
             $arrParams[] = $intProductId;
         }
-        
+
         if ($purchasePrice) {
             $strQuery .= ' AND NOT (purchase_price IS NULL or purchase_price = 0)';
         }
-        
+
         $this->printHeader($format);
-        
+
         $stockValue = 0;
-        $intRes = mysqli_param_query($strQuery, $arrParams);
-        while ($row = mysqli_fetch_assoc($intRes)) {
-            $this->printRow($format, $row['product_code'], $row['product_name'], 
-                $row['purchase_price'], $row['unit_price'], $row['stock_balance']);
+        $rows = dbParamQuery($strQuery, $arrParams);
+        foreach ($rows as $row) {
+            $this->printRow(
+                $format, $row['id'], $row['product_code'], $row['product_name'],
+                $row['purchase_price'], $row['unit_price'], $row['stock_balance']
+            );
             $stockValue += $row['stock_balance'] * $row['purchase_price'];
         }
         $this->printTotals($format, $stockValue);
         $this->printFooter($format);
     }
 
+    /**
+     * Print row header
+     *
+     * @param string $format Print format
+     *
+     * @return void
+     */
     protected function printHeader($format)
     {
         if ($format == 'pdf') {
             ob_end_clean();
             $pdf = new PDF('P', 'mm', 'A4', _CHARSET_ == 'UTF-8', _CHARSET_, false);
             $pdf->setTopMargin(20);
-            $pdf->headerRight = $GLOBALS['locReportPage'];
+            $pdf->headerRight = Translator::translate('ReportPage');
             $pdf->printHeaderOnFirstPage = true;
             $pdf->AddPage();
-            $pdf->SetAutoPageBreak(TRUE, 15);
-            
+            $pdf->SetAutoPageBreak(true, 15);
+
             $pdf->setY(10);
             $pdf->SetFont('Helvetica', 'B', 12);
-            $pdf->Cell(100, 5, $GLOBALS['locProductStockReport'], 0, 1, 'L');
-            
+            $pdf->Cell(100, 10, Translator::translate('ProductStockReport'), 0, 1, 'L');
+
             $pdf->SetFont('Helvetica', 'B', 8);
-            $pdf->Cell(50, 10, date($GLOBALS['locDateFormat']), 0, 1, 'L');
-            $pdf->Cell(15, 4, $GLOBALS['locCode'], 0, 0, 'L');
-            $pdf->Cell(40, 4, $GLOBALS['locProduct'], 0, 0, 'L');
-            $pdf->Cell(25, 4, $GLOBALS['locUnitPrice'], 0, 0, 'R');
-            $pdf->Cell(25, 4, $GLOBALS['locPurchasePrice'], 0, 0, 'R');
-            $pdf->Cell(25, 4, $GLOBALS['locStockBalance'], 0, 0, 'R');
-            $pdf->Cell(25, 4, $GLOBALS['locStockValue'], 0, 1, 'R');
+            $pdf->Cell(50, 10, date(Translator::translate('DateFormat')), 0, 1, 'L');
+
+            if ($params = $this->getParamsStr(false)) {
+                $pdf->SetFont('Helvetica', '', 8);
+                $pdf->MultiCell(180, 5, $params, 0, 'L');
+                $pdf->setY($pdf->getY() + 5);
+            }
+
+            $pdf->SetFont('Helvetica', 'B', 8);
+            $pdf->Cell(15, 4, Translator::translate('Code'), 0, 0, 'L');
+            $pdf->Cell(40, 4, Translator::translate('Product'), 0, 0, 'L');
+            $pdf->Cell(25, 4, Translator::translate('UnitPrice'), 0, 0, 'R');
+            $pdf->Cell(25, 4, Translator::translate('PurchasePrice'), 0, 0, 'R');
+            $pdf->Cell(25, 4, Translator::translate('StockBalance'), 0, 0, 'R');
+            $pdf->Cell(25, 4, Translator::translate('StockValue'), 0, 1, 'R');
             $this->pdf = $pdf;
             return;
         }
         ?>
-<div class="report">
-	<table>
-		<tr>
-			<th class="label">
-            <?php echo $GLOBALS['locCode']?>
-        </th>
-			<th class="label">
-            <?php echo $GLOBALS['locProduct']?>
-        </th>
-			<th class="label" style="text-align: right">
-            <?php echo $GLOBALS['locUnitPrice']?>
-        </th>
-			<th class="label" style="text-align: right">
-            <?php echo $GLOBALS['locPurchasePrice']?>
-        </th>
-			<th class="label" style="text-align: right">
-            <?php echo $GLOBALS['locStockBalance']?>
-        </th>
-			<th class="label" style="text-align: right">
-            <?php echo $GLOBALS['locStockValue']?>
-        </th>
-		</tr>
-<?php
+  <div class="report">
+    <table class="report-table">
+      <tr>
+        <td>
+          <div class="unlimited_label">
+            <strong><?php echo Translator::translate('ProductStockReport')?></strong>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td><?php echo $this->getParamsStr(true) ?></td>
+      </tr>
+    </table>
+
+    <table class="report-table<?php echo $format == 'table' ? ' datatable' : '' ?>">
+      <thead>
+        <tr>
+          <th class="label">
+            <?php echo Translator::translate('Code')?>
+          </th>
+          <th class="label">
+            <?php echo Translator::translate('Product')?>
+          </th>
+          <th class="label sum">
+            <?php echo Translator::translate('UnitPrice')?>
+          </th>
+          <th class="label sum">
+            <?php echo Translator::translate('PurchasePrice')?>
+          </th>
+          <th class="label sum">
+            <?php echo Translator::translate('StockBalance')?>
+          </th>
+          <th class="label sum">
+            <?php echo Translator::translate('StockValue')?>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php
     }
 
-    protected function printRow($format, $strCode, $strProduct, $purchasePrice, 
-        $unitPrice, $stockBalance)
-    {
+    /**
+     * Print a row
+     *
+     * @param string $format        Print format
+     * @param int    $id            Product id
+     * @param string $strCode       Product code
+     * @param string $strProduct    Product name
+     * @param int    $purchasePrice Purchase price
+     * @param int    $unitPrice     Unit price
+     * @param int    $stockBalance  Stock balance
+     *
+     * @return void
+     */
+    protected function printRow($format, $id, $strCode, $strProduct, $purchasePrice,
+        $unitPrice, $stockBalance
+    ) {
+
         if ($format == 'pdf') {
-            if (!$strProduct)
+            if (!$strProduct) {
                 $strProduct = '-';
-            
+            }
+
             $pdf = $this->pdf;
             $pdf->SetFont('Helvetica', '', 8);
             $pdf->setY($pdf->getY() + 1);
@@ -181,8 +280,10 @@ class ProductStockReport
             $pdf->Cell(25, 3, miscRound2Decim($unitPrice), 0, 0, 'R');
             $pdf->Cell(25, 3, miscRound2Decim($purchasePrice), 0, 0, 'R');
             $pdf->Cell(25, 3, miscRound2Decim($stockBalance), 0, 0, 'R');
-            $pdf->Cell(25, 3, miscRound2Decim($stockBalance * $purchasePrice), 0, 0, 
-                'R');
+            $pdf->Cell(
+                25, 3, miscRound2Decim($stockBalance * $purchasePrice), 0, 0,
+                'R'
+            );
             $pdf->setX($nameX);
             $cells2 = $pdf->MultiCell(40, 3, $strProduct, 0, 'L');
             if ($cells > $cells2) {
@@ -190,72 +291,96 @@ class ProductStockReport
             }
             return;
         }
-        if (!$strProduct)
+        if (!$strProduct) {
             $strProduct = '&ndash;';
-        else
+        } else {
             $strProduct = htmlspecialchars($strProduct);
+        }
         ?>
-    <tr>
-			<td class="input">
+      <tr>
+        <td class="input">
             <?php echo $strCode?>
         </td>
-			<td class="input">
-            <?php echo $strProduct?>
+        <td class="input" data-sort="<?php echo $strProduct?>">
+            <?php
+            $link = 'index.php?func=settings&list=product&form=product&id='
+                . htmlspecialchars($id);
+            ?>
+            <a href="<?php echo $link?>">
+                <?php echo $strProduct?>
+            </a>
         </td>
-			<td class="input" style="text-align: right">
+        <td class="input sum" data-export="<?php echo miscRound2US($unitPrice)?>">
             <?php echo miscRound2Decim($unitPrice)?>
         </td>
-			<td class="input" style="text-align: right">
+        <td class="input sum" data-export="<?php echo miscRound2US($purchasePrice)?>">
             <?php echo miscRound2Decim($purchasePrice)?>
         </td>
-			<td class="input" style="text-align: right">
+        <td class="input sum" data-export="<?php echo miscRound2US($stockBalance)?>">
             <?php echo miscRound2Decim($stockBalance)?>
         </td>
-			<td class="input" style="text-align: right">
+        <td class="input sum" data-export="<?php echo miscRound2US($stockBalance * $purchasePrice)?>">
             <?php echo miscRound2Decim($stockBalance * $purchasePrice)?>
         </td>
-		</tr>
-<?php
+      </tr>
+        <?php
     }
 
+    /**
+     * Print totals
+     *
+     * @param string $format     Print format
+     * @param int    $stockValue Product stock value
+     *
+     * @return void
+     */
     protected function printTotals($format, $stockValue)
     {
         if ($format == 'pdf') {
             $pdf = $this->pdf;
-            if ($pdf->getY() > $pdf->getPageHeight() - 7 - 15)
+            if ($pdf->getY() > $pdf->getPageHeight() - 7 - 15) {
                 $pdf->AddPage();
+            }
             $pdf->SetFont('Helvetica', '', 8);
             $pdf->setLineWidth(0.2);
-            
+
             $sumPos = 130;
             $rowWidth = 150;
-            
+
             $pdf = $this->pdf;
             $pdf->SetFont('Helvetica', 'B', 8);
-            $pdf->line($pdf->getX() + $sumPos, $pdf->getY(), 
-                $pdf->getX() + $rowWidth, $pdf->getY());
             $pdf->setY($pdf->getY() + 1);
-            $pdf->Cell($sumPos, 4, $GLOBALS['locTotal'], 0, 0, 'R');
+            $pdf->Cell($sumPos, 4, Translator::translate('Total'), 0, 0, 'R');
             $pdf->Cell(25, 4, miscRound2Decim($stockValue), 0, 1, 'R');
             return;
         }
-        
+
+        if ($format != 'html') {
+            return;
+        }
+
         $colSpan = 5;
         ?>
-    <tr>
-    <?php if ($colSpan > 0) { ?>
-        <td class="input total_sum" colspan="<?php echo $colSpan?>"
-				style="text-align: right">
-            <?php echo $GLOBALS['locTotal']?>
+      <tr>
+        <?php if ($colSpan > 0) { ?>
+        <td class="input sum total_sum" colspan="<?php echo $colSpan?>">
+            <?php echo Translator::translate('Total')?>
         </td>
-    <?php } ?>
-        <td class="input total_sum" style="text-align: right">
+        <?php } ?>
+        <td class="input sum total_sum">
             &nbsp;<?php echo miscRound2Decim($stockValue)?>
         </td>
-		</tr>
-<?php
+      </tr>
+        <?php
     }
 
+    /**
+     * Print footer
+     *
+     * @param string $format Print format
+     *
+     * @return void
+     */
     protected function printFooter($format)
     {
         if ($format == 'pdf') {
@@ -264,8 +389,71 @@ class ProductStockReport
             return;
         }
         ?>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+        </tr>
+      </tfoot>
     </table>
-</div>
-<?php
+  </div>
+        <?php
+        if ($format == 'table') {
+            ?>
+<script>
+var table = $('.report-table.datatable').DataTable({
+    'language': {
+            <?php echo Translator::translate('TableTexts')?>
+    },
+    'pageLength': 50,
+    'jQueryUI': true,
+    'pagingType': 'full_numbers',
+    'footerCallback': function (row, data, start, end, display) {
+        var api = this.api(), data;
+
+        var _intVal = function (s) {
+            var integer = parseInt(s, 10);
+            return !isNaN(integer) ? integer : null;
+        };
+
+        $([5]).each(function(i, column) {
+            // Total over all pages
+            var total = api
+                .column(column)
+                .data()
+                .reduce(function (a, b) {
+                    return _intVal(a) + _intVal(b);
+                }, 0);
+
+
+            // Total over this page
+            var pageTotal = api
+                .column(column, { page: 'current'})
+                .data()
+                .reduce(function (a, b) {
+                    return _intVal(a) + _intVal(b);
+                }, 0);
+
+            // Update footer
+            pageTotal = MLInvoice.formatCurrency(pageTotal/100);
+            total = MLInvoice.formatCurrency(total/100);
+            $(api.column(column).footer()).html(
+                '<div class="list-footer-summary"><?php echo Translator::translate('VisiblePage') ?>&nbsp;'
+                + pageTotal + '</div><br><div class="list-footer-summary"><?php echo Translator::translate('Total') ?>&nbsp;'
+                + total + '</div>'
+            );
+        });
+    }
+});
+
+MLInvoice.initTableExportButtons(table);
+</script>
+            <?php
+        }
     }
 }

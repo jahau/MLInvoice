@@ -1,110 +1,178 @@
 <?php
-/*******************************************************************************
- MLInvoice: web-based invoicing application.
- Copyright (C) 2010-2015 Ere Maijala
+/**
+ * Printouts
+ *
+ * PHP version 5
+ *
+ * Copyright (C) 2004-2008 Samu Reinikainen
+ * Copyright (C) 2010-2018 Ere Maijala
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2,
+ * as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * @category MLInvoice
+ * @package  MLInvoice\Base
+ * @author   Ere Maijala <ere@labs.fi>
+ * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
+ * @link     http://labs.fi/mlinvoice.eng.php
+ */
 
- Portions based on:
- PkLasku : web-based invoicing software.
- Copyright (C) 2004-2008 Samu Reinikainen
+ // buffered, so we can redirect later if necessary
+ini_set('implicit_flush', 'Off');
+ob_start();
 
- This program is free software. See attached LICENSE.
-
- *******************************************************************************/
-
-/*******************************************************************************
- MLInvoice: web-pohjainen laskutusohjelma.
- Copyright (C) 2010-2015 Ere Maijala
-
- Perustuu osittain sovellukseen:
- PkLasku : web-pohjainen laskutusohjelmisto.
- Copyright (C) 2004-2008 Samu Reinikainen
-
- Tämä ohjelma on vapaa. Lue oheinen LICENSE.
-
- *******************************************************************************/
 require_once 'sessionfuncs.php';
 
-sesVerifySession();
+$authenticated = true;
+$intInvoiceId = getPostOrQuery('id', false);
+$printTemplate = getPostOrQuery('t', false);
+$dateOverride = false;
+$language = getPostOrQuery('l', false);
+$uuid = getPostOrQuery('i', false);
+$hash = getPostOrQuery('c', false);
+$ts = getPostOrQuery('s', false);
+if (false === $printTemplate || false === $language || false === $uuid
+    || false === $hash || false === $ts
+) {
+    if ($intInvoiceId) {
+        sesVerifySession();
+    } else {
+        return;
+    }
+} else {
+    $authenticated = false;
+}
 
+require_once 'vendor/autoload.php';
 require_once 'sqlfuncs.php';
-require_once 'localize.php';
-require_once 'pdf.php';
+require_once 'translator.php';
 require_once 'datefuncs.php';
 require_once 'miscfuncs.php';
 
-$intInvoiceId = getRequest('id', FALSE);
-$printTemplate = getRequest('template', 1);
-
-if (!$intInvoiceId)
-    return;
-
-$res = mysqli_param_query(
-    'SELECT filename, parameters, output_filename from {prefix}print_template WHERE id=?',
-    [
-        $printTemplate
-    ]);
-if (!$row = mysqli_fetch_row($res))
-    return;
-$printTemplateFile = $row[0];
-$printParameters = $row[1];
-$printOutputFileName = $row[2];
-
-$strQuery = 'SELECT inv.*, ref.invoice_no as refunded_invoice_no, delivery_terms.name as delivery_terms, delivery_method.name as delivery_method, invoice_state.name as invoice_state, invoice_state.invoice_open as invoice_open, invoice_state.invoice_unpaid as invoice_unpaid ' .
-     'FROM {prefix}invoice inv ' .
-     'LEFT OUTER JOIN {prefix}invoice ref ON ref.id = inv.refunded_invoice_id ' .
-     'LEFT OUTER JOIN {prefix}delivery_terms as delivery_terms ON delivery_terms.id = inv.delivery_terms_id ' .
-     'LEFT OUTER JOIN {prefix}delivery_method as delivery_method ON delivery_method.id = inv.delivery_method_id ' .
-     'LEFT OUTER JOIN {prefix}invoice_state as invoice_state ON invoice_state.id = inv.state_id ' .
-     'WHERE inv.id=?';
-$intRes = mysqli_param_query($strQuery, [
-    $intInvoiceId
-]);
-$invoiceData = mysqli_fetch_assoc($intRes);
-if (!$invoiceData)
-    die('Could not find invoice data');
-
-$strQuery = 'SELECT * FROM {prefix}company WHERE id=?';
-$intRes = mysqli_param_query($strQuery, [
-    $invoiceData['company_id']
-]);
-$recipientData = mysqli_fetch_assoc($intRes);
-if (!empty($recipientData['company_id'])) {
-    $recipientData['vat_id'] = createVATID($recipientData['company_id']);
+if ($authenticated) {
+    $printTemplate = getPostOrQuery('template', 1);
+    $dateOverride = getPostOrQuery('date', false);
+    if (!is_string($dateOverride) || !ctype_digit($dateOverride)
+        || strlen($dateOverride) != 8
+    ) {
+        $dateOverride = false;
+    }
 } else {
-    $recipientData['vat_id'] = '';
+    include_once 'hmac.php';
+    $reqHash = HMAC::createHMAC([$printTemplate, $language, $uuid, $ts]);
+    if ($reqHash !== $hash) {
+        return;
+    }
+    Translator::setActiveLanguage('', $language);
+    if (abs(time() - $ts) > 90 * 24 * 60 * 60) { // 90 days
+        die(Translator::translate('LinkExpired'));
+    }
+    $rows = dbParamQuery(
+        'SELECT id FROM {prefix}invoice WHERE uuid=?',
+        [$uuid]
+    );
+    if (!$rows) {
+        return;
+    }
+    $intInvoiceId = $rows[0]['id'];
 }
 
-$strQuery = 'SELECT * FROM {prefix}base WHERE id=?';
-$intRes = mysqli_param_query($strQuery, [
-    $invoiceData['base_id']
-]);
-$senderData = mysqli_fetch_assoc($intRes);
-if (!$senderData)
-    die('Could not find invoice sender data');
-$senderData['vat_id'] = createVATID($senderData['company_id']);
-
-$strQuery = 'SELECT pr.product_name, pr.product_code, pr.price_decimals, pr.barcode1, pr.barcode1_type, pr.barcode2, pr.barcode2_type, ir.description, ir.pcs, ir.price, IFNULL(ir.discount, 0) as discount, ir.row_date, ir.vat, ir.vat_included, ir.reminder_row, ir.partial_payment, rt.name type ' .
-     'FROM {prefix}invoice_row ir ' .
-     'LEFT OUTER JOIN {prefix}row_type rt ON rt.id = ir.type_id ' .
-     'LEFT OUTER JOIN {prefix}product pr ON ir.product_id = pr.id ' .
-     'WHERE ir.invoice_id=? AND ir.deleted=0 ORDER BY ir.order_no, row_date, pr.product_name DESC, ir.description DESC';
-$intRes = mysqli_param_query($strQuery, [
-    $intInvoiceId
-]);
-$invoiceRowData = [];
-while ($row = mysqli_fetch_assoc($intRes)) {
-    $invoiceRowData[] = $row;
+if (!$intInvoiceId) {
+    if ($authenticated) {
+        die('Id missing');
+    }
+    return;
 }
 
-if (sesWriteAccess()) {
-    mysqli_param_query('UPDATE {prefix}invoice SET print_date=? where id=?',
-        [
-            date('Ymd'),
-            $intInvoiceId
-        ]);
+$rows = dbParamQuery(
+    'SELECT filename, parameters, output_filename from {prefix}print_template WHERE id=?',
+    [$printTemplate]
+);
+if (!$rows) {
+    if ($authenticated) {
+        die('Could not find print template');
+    }
+    return;
+}
+$row = $rows[0];
+$printTemplateFile = $row['filename'];
+$printParameters = $row['parameters'];
+$printOutputFileName = $row['output_filename'];
+
+if (!$authenticated) {
+    if (substr($printTemplateFile, -6) === '_email') {
+        $printTemplateFile = substr($printTemplateFile, -6);
+    }
+    $printParameters[1] = $language;
 }
 
-$printer = instantiateInvoicePrinter(trim($printTemplateFile));
-$printer->init($intInvoiceId, $printParameters, $printOutputFileName, $senderData,
-    $recipientData, $invoiceData, $invoiceRowData);
-$printer->printInvoice();
+if ($authenticated && is_array($intInvoiceId)) {
+
+    if (!sesWriteAccess()) {
+        die('Write access required for printing multiple');
+    }
+
+    include_once 'pdf.php';
+    $mainPdf = new PDF('P', 'mm', 'A4', _CHARSET_ == 'UTF-8', _CHARSET_, false);
+    foreach ($intInvoiceId as $singleId) {
+        $printer = getInvoicePrinter($printTemplateFile);
+        $uses = class_uses($printer);
+        if (in_array('InvoicePrinterEmailTrait', $uses)
+            || $printer instanceof InvoicePrinterXSLT
+            || $printer instanceof InvoicePrinterBlank
+        ) {
+            die('Cannot print multiple with the given print template');
+        }
+
+        verifyInvoiceDataForPrinting($singleId);
+
+        $printer->init(
+            $singleId, $printParameters, $printOutputFileName,
+            $dateOverride, $printTemplate, $authenticated
+        );
+
+        $pdfResult = $printer->createPrintout();
+
+        // Import PDF
+        $pageCount = $mainPdf->setSourceFile(
+            \setasign\Fpdi\PdfParser\StreamReader::createByString($pdfResult['data'])
+        );
+        for ($i = 1; $i <= $pageCount; $i++) {
+            $tplx = $mainPdf->importPage($i);
+            $size = $mainPdf->getTemplateSize($tplx);
+            $mainPdf->AddPage('P', array($size['width'], $size['height']));
+            $mainPdf->useTemplate($tplx);
+        }
+
+        if ($authenticated && sesWriteAccess()) {
+            updateInvoicePrintDate($singleId);
+        }
+    }
+    $filename = Translator::Translate('File') . '_' . date('Y-m-d_H:i:s') . '.pdf';
+    $pdfResult['headers']['Content-Disposition'] = 'inline; filename="' . $filename . '"';
+    foreach ($pdfResult['headers'] as $header => $value) {
+        header("$header: $value");
+    }
+    echo $mainPdf->Output('', 'S');
+} else {
+    $printer = getInvoicePrinter($printTemplateFile);
+    $printer->init(
+        $intInvoiceId, $printParameters, $printOutputFileName,
+        $dateOverride, $printTemplate, $authenticated
+    );
+    $printer->printInvoice();
+
+    if ($authenticated && sesWriteAccess()) {
+        updateInvoicePrintDate($intInvoiceId);
+    }
+}
